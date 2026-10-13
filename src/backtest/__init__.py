@@ -30,6 +30,14 @@ from .simulate import (
     simulate_trades,
 )
 
+from .metrics import (
+    DEFAULT_DEVELOPMENT_YEARS,
+    by_year,
+    evaluate_pass,
+    random_control,
+    summarize,
+)
+
 __all__ = [
     "M1Data",
     "load_m1",
@@ -52,4 +60,9 @@ __all__ = [
     "get_effective_spread",
     "simulate_single_trade",
     "simulate_trades",
+    "DEFAULT_DEVELOPMENT_YEARS",
+    "summarize",
+    "by_year",
+    "random_control",
+    "evaluate_pass",
 ]
