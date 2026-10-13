@@ -58,3 +58,5 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 | Ngày | N | Nội dung | Tiêu chí đăng ký trước | Kết quả |
 |---|---|---|---|---|
 | 2026-10-13 | 1 | Baseline PRIMARY (mục 4) | Mục 5 | (chưa chạy) |
+| 2026-10-13 | 2 | Đăng ký ngưỡng nến vùng Á (bước 3) | Cửa sổ [00:00, 07:00) UTC. Ngưỡng hợp lệ: n_bars >= 378 (90% của 420 nến M1 lý thuyết). Ngày < 378 nến gán valid=False và bỏ qua. Dựa trên phân phối thực nghiệm (Development p0.5%=414.6, p50%=420; loại 2 ngày lễ tết 26/12 và 02/01 chỉ có 60 nến; Robustness loại 7 ngày) thuần túy theo chất lượng dữ liệu trước khi có P&L. | Đã chốt trước P&L |
+
