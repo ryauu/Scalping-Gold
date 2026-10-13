@@ -118,14 +118,24 @@ def compute_asian_range(
     return result[columns_out]
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 def generate_breakout_signals(
     m1: pd.DataFrame | M1Data,
     asian_ranges: pd.DataFrame | None = None,
     atr_multiplier: float = 0.1,
     window_start_hour: int = 7,
     window_end_hour: int = 13,
-) -> pd.DataFrame:
+    return_summary: bool = False,
+) -> pd.DataFrame | tuple[pd.DataFrame, dict[str, int]]:
     """Sinh tín hiệu phá vỡ (Breakout) phiên Á theo PROTOCOL.md mục 4.
+
+    Tối ưu hóa:
+    - Lọc trước cửa sổ [window_start_hour, window_end_hour) UTC.
+    - Vector hóa bằng NumPy (np.argmax) cho từng ngày, tốc độ thực thi C.
 
     Cửa sổ vào lệnh:
     - Nửa mở [window_start_hour:00, window_end_hour:00) UTC (mặc định [07:00, 13:00)).
@@ -140,11 +150,18 @@ def generate_breakout_signals(
     - Tối đa 1 lệnh/ngày (hướng phá vỡ đầu tiên). Nếu cả BUY và SELL đều thỏa mãn trong ngày,
       chọn hướng xuất hiện sớm hơn.
 
-    Vào lệnh:
+    Vào lệnh & Độ trễ:
     - Vào lệnh tại giá MỞ (Open) của nến M1 kế tiếp theo thứ tự thực tế trong chuỗi dữ liệu.
+    - Độ trễ vào lệnh: entry_delay = (entry_time - signal_time) tính bằng phút.
     - Nếu nến tín hiệu là nến cuối cùng trước 13:00 (hoặc nến kế tiếp có giờ >= 13:00 hoặc hết dữ liệu),
       bỏ qua tín hiệu vì không kịp vào lệnh trong cửa sổ [07:00, 13:00).
     - Bỏ qua các ngày có vùng Á không hợp lệ (valid=False) hoặc ATR bị NaN.
+
+    Kiểm đếm & Tóm tắt (Summary):
+    - Tự động thống kê: total_days, invalid_asian_days, valid_asian_days, atr_nan_days,
+      no_signal_days, signal_without_entry_days, valid_signal_days.
+    - Cảnh báo rõ ràng nếu dữ liệu M1 bị thiếu phiên Á dẫn đến invalid_asian_days chiếm 100%.
+    - Luôn lưu bảng tóm tắt vào thuộc tính DataFrame: `signals_df.attrs["summary"]`.
 
     Tham số:
         m1: Dữ liệu nến M1 (DataFrame hoặc M1Data).
@@ -152,6 +169,8 @@ def generate_breakout_signals(
         atr_multiplier: Hệ số đệm ATR (mặc định 0.1).
         window_start_hour: Giờ bắt đầu cửa sổ vào lệnh theo UTC (mặc định 7).
         window_end_hour: Giờ kết thúc cửa sổ vào lệnh theo UTC (mặc định 13).
+        return_summary: Nếu True, trả về tuple (signals_df, summary_dict).
+                        Nếu False (mặc định), trả về signals_df (summary có trong .attrs["summary"]).
 
     Trả về:
         DataFrame chứa mỗi ngày có tín hiệu 1 dòng:
@@ -159,6 +178,7 @@ def generate_breakout_signals(
         - direction: str ("BUY" hoặc "SELL")
         - signal_time: pd.Timestamp (thời điểm nến M1 đóng cửa sinh tín hiệu)
         - entry_time: pd.Timestamp (thời điểm nến M1 mở cửa vào lệnh)
+        - entry_delay: int (khoảng cách phút giữa entry_time và signal_time)
         - entry_price: float (giá Open tại entry_time)
         - threshold: float (ngưỡng giá kích hoạt tín hiệu)
         - atr: float (giá trị ATR tại nến tín hiệu)
@@ -171,6 +191,7 @@ def generate_breakout_signals(
         "direction",
         "signal_time",
         "entry_time",
+        "entry_delay",
         "entry_price",
         "threshold",
         "atr",
@@ -178,14 +199,26 @@ def generate_breakout_signals(
         "asia_low",
     ]
 
+    empty_summary: dict[str, int] = {
+        "total_days": 0,
+        "invalid_asian_days": 0,
+        "valid_asian_days": 0,
+        "atr_nan_days": 0,
+        "no_signal_days": 0,
+        "signal_without_entry_days": 0,
+        "valid_signal_days": 0,
+    }
+
     if m1_df.empty:
-        return pd.DataFrame(columns=columns_out)
+        empty_df = pd.DataFrame(columns=columns_out)
+        empty_df.attrs["summary"] = empty_summary
+        return (empty_df, empty_summary) if return_summary else empty_df
 
     if "time_utc" not in m1_df.columns:
         raise KeyError("Dữ liệu M1 cần có cột 'time_utc'")
 
-    m1_df["time_utc"] = pd.to_datetime(m1_df["time_utc"])
-    m1_df = m1_df.sort_values("time_utc").reset_index(drop=True)
+    time_ts = pd.to_datetime(m1_df["time_utc"])
+    m1_df["time_utc"] = time_ts
 
     # Đảm bảo có cột ATR(H1, 14) không look-ahead
     if "atr" not in m1_df.columns or m1_df["atr"].isna().all():
@@ -195,77 +228,159 @@ def generate_breakout_signals(
     if asian_ranges is None:
         asian_ranges = compute_asian_range(m1_df, mask_invalid=True)
 
-    # Chỉ lọc các ngày hợp lệ
-    valid_days = asian_ranges[
-        asian_ranges["valid"] & asian_ranges["asia_high"].notna() & asian_ranges["asia_low"].notna()
-    ]
-    if valid_days.empty:
-        return pd.DataFrame(columns=columns_out)
+    total_days = len(asian_ranges)
+    valid_mask = (
+        asian_ranges["valid"]
+        & asian_ranges["asia_high"].notna()
+        & asian_ranges["asia_low"].notna()
+    )
+    valid_days_df = asian_ranges[valid_mask]
+    invalid_asian_days = total_days - len(valid_days_df)
+    valid_asian_days = len(valid_days_df)
+
+    # Cảnh báo nếu toàn bộ ngày đều có vùng Á không hợp lệ (ví dụ M1 chỉ chứa cửa sổ 07-13h)
+    if invalid_asian_days == total_days and total_days > 0:
+        logger.warning(
+            "Cảnh báo: Toàn bộ %d ngày đều có vùng Á không hợp lệ (n_bars < %d hoặc thiếu dữ liệu). "
+            "Hàm trả về DataFrame rỗng. Hãy kiểm tra xem dữ liệu M1 truyền vào có bị cắt mất cửa sổ "
+            "phiên Á [00:00, 07:00) UTC hay không!",
+            total_days,
+            DEFAULT_MIN_ASIAN_BARS,
+        )
+
+    if valid_days_df.empty:
+        summary = {
+            "total_days": total_days,
+            "invalid_asian_days": invalid_asian_days,
+            "valid_asian_days": 0,
+            "atr_nan_days": 0,
+            "no_signal_days": 0,
+            "signal_without_entry_days": 0,
+            "valid_signal_days": 0,
+        }
+        res_empty = pd.DataFrame(columns=columns_out)
+        res_empty.attrs["summary"] = summary
+        return (res_empty, summary) if return_summary else res_empty
 
     # Map tra cứu nhanh vùng Á theo ngày
     ranges_by_date: dict[pd.Timestamp, tuple[float, float]] = {
         pd.Timestamp(row["date"]).floor("D"): (float(row["asia_high"]), float(row["asia_low"]))
-        for _, row in valid_days.iterrows()
+        for _, row in valid_days_df.iterrows()
     }
 
-    m1_df["trade_date"] = m1_df["time_utc"].dt.floor("D")
-    records: list[dict[str, Any]] = []
+    # Lọc trước nến M1 trong cửa sổ vào lệnh [window_start_hour, window_end_hour)
+    hours = m1_df["time_utc"].dt.hour
+    in_window_mask = (hours >= window_start_hour) & (hours < window_end_hour)
+    win_m1 = m1_df[in_window_mask].sort_values("time_utc").reset_index(drop=True)
+    win_m1["trade_date"] = win_m1["time_utc"].dt.floor("D")
 
-    for trade_date, day_group in m1_df.groupby("trade_date", sort=True):
-        if trade_date not in ranges_by_date:
+    records: list[dict[str, Any]] = []
+    atr_nan_days = 0
+    no_signal_days = 0
+    signal_without_entry_days = 0
+    valid_signal_days = 0
+
+    grouped = win_m1.groupby("trade_date", sort=True)
+    grouped_dates = set(grouped.groups.keys())
+
+    # Duyệt qua từng ngày có vùng Á hợp lệ
+    for trade_date_raw in valid_days_df["date"]:
+        trade_date = pd.Timestamp(trade_date_raw).floor("D")
+        if trade_date not in grouped_dates:
+            # Ngày có vùng Á hợp lệ nhưng không có nến nào trong cửa sổ 07-13h
+            no_signal_days += 1
             continue
 
         asia_high, asia_low = ranges_by_date[trade_date]
-        day_bars = day_group.reset_index(drop=True)
-        n_day_bars = len(day_bars)
+        group = grouped.get_group(trade_date)
 
-        # Duyệt nến trong ngày tìm tín hiệu đầu tiên
-        for i in range(n_day_bars):
-            bar_time = day_bars["time_utc"].iloc[i]
-            bar_hour = bar_time.hour
+        close = group["close"].to_numpy()
+        atr = group["atr"].to_numpy()
+        open_prices = group["open"].to_numpy()
+        times = group["time_utc"].to_numpy()
 
-            # Cửa sổ vào lệnh: [window_start_hour, window_end_hour)
-            if bar_hour < window_start_hour or bar_hour >= window_end_hour:
-                continue
+        valid_atr = ~np.isnan(atr) & (atr > 0)
+        if not np.any(valid_atr):
+            atr_nan_days += 1
+            continue
 
-            bar_atr = day_bars["atr"].iloc[i]
-            if pd.isna(bar_atr) or bar_atr <= 0:
-                continue
+        buy_thresh = asia_high + atr_multiplier * atr
+        sell_thresh = asia_low - atr_multiplier * atr
 
-            bar_close = day_bars["close"].iloc[i]
-            buy_threshold = asia_high + atr_multiplier * bar_atr
-            sell_threshold = asia_low - atr_multiplier * bar_atr
+        buy_cond = valid_atr & (close > buy_thresh)
+        sell_cond = valid_atr & (close < sell_thresh)
 
-            is_buy = bar_close > buy_threshold
-            is_sell = bar_close < sell_threshold
+        has_buy = np.any(buy_cond)
+        has_sell = np.any(sell_cond)
 
-            if is_buy or is_sell:
-                # Tìm nến kế tiếp thực tế để vào lệnh
-                if i + 1 < n_day_bars:
-                    next_bar = day_bars.iloc[i + 1]
-                    next_time = next_bar["time_utc"]
-                    # Nến kế tiếp phải vào lệnh trước khi cửa sổ đóng
-                    if next_time.hour < window_end_hour and next_time.floor("D") == trade_date:
-                        direction = "BUY" if is_buy else "SELL"
-                        thresh = buy_threshold if is_buy else sell_threshold
-                        records.append({
-                            "date": trade_date,
-                            "direction": direction,
-                            "signal_time": bar_time,
-                            "entry_time": next_time,
-                            "entry_price": float(next_bar["open"]),
-                            "threshold": thresh,
-                            "atr": float(bar_atr),
-                            "asia_high": asia_high,
-                            "asia_low": asia_low,
-                        })
-                # Tối đa 1 lệnh/ngày: dù có khớp được nến kế tiếp hay không,
-                # đây là hướng phá vỡ đầu tiên, dừng tìm kiếm trong ngày này.
-                break
+        if not has_buy and not has_sell:
+            no_signal_days += 1
+            continue
 
-    if not records:
-        return pd.DataFrame(columns=columns_out)
+        if has_buy and not has_sell:
+            sig_idx = int(np.argmax(buy_cond))
+            direction = "BUY"
+            thresh = buy_thresh[sig_idx]
+        elif has_sell and not has_buy:
+            sig_idx = int(np.argmax(sell_cond))
+            direction = "SELL"
+            thresh = sell_thresh[sig_idx]
+        else:
+            b_idx = int(np.argmax(buy_cond))
+            s_idx = int(np.argmax(sell_cond))
+            if b_idx < s_idx:
+                sig_idx = b_idx
+                direction = "BUY"
+                thresh = buy_thresh[sig_idx]
+            else:
+                sig_idx = s_idx
+                direction = "SELL"
+                thresh = sell_thresh[sig_idx]
 
-    return pd.DataFrame(records)[columns_out]
+        # Kiểm tra nến kế tiếp để vào lệnh
+        # Vì toàn bộ mảng group đã nằm trong [window_start_hour, window_end_hour),
+        # nếu sig_idx + 1 < len(close), nến kế tiếp đảm bảo cùng ngày và giờ < window_end_hour
+        if sig_idx + 1 < len(close):
+            entry_idx = sig_idx + 1
+            entry_time = times[entry_idx]
+            sig_time = times[sig_idx]
+            entry_delay_min = int((entry_time - sig_time) / np.timedelta64(1, "m"))
+            valid_signal_days += 1
+
+            records.append({
+                "date": trade_date,
+                "direction": direction,
+                "signal_time": pd.Timestamp(sig_time),
+                "entry_time": pd.Timestamp(entry_time),
+                "entry_delay": entry_delay_min,
+                "entry_price": float(open_prices[entry_idx]),
+                "threshold": float(thresh),
+                "atr": float(atr[sig_idx]),
+                "asia_high": float(asia_high),
+                "asia_low": float(asia_low),
+            })
+        else:
+            # Tín hiệu rơi vào đúng nến cuối cùng của cửa sổ hôm đó (không có nến tiếp theo < 13:00)
+            signal_without_entry_days += 1
+
+    summary = {
+        "total_days": total_days,
+        "invalid_asian_days": invalid_asian_days,
+        "valid_asian_days": valid_asian_days,
+        "atr_nan_days": atr_nan_days,
+        "no_signal_days": no_signal_days,
+        "signal_without_entry_days": signal_without_entry_days,
+        "valid_signal_days": valid_signal_days,
+    }
+
+    if records:
+        res_df = pd.DataFrame(records)[columns_out]
+    else:
+        res_df = pd.DataFrame(columns=columns_out)
+
+    res_df.attrs["summary"] = summary
+
+    return (res_df, summary) if return_summary else res_df
+
 
 

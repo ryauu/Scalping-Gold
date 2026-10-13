@@ -324,8 +324,91 @@ class TestSignalsModule(unittest.TestCase):
         self.assertAlmostEqual(sig["entry_price"], 2077.83, places=2)
         self.assertAlmostEqual(sig["asia_high"], 2076.68, places=2)
         self.assertAlmostEqual(sig["threshold"], 2077.07, places=2)
+        self.assertEqual(sig["entry_delay"], 1, "Độ trễ nến kế tiếp liên tục là 1 phút")
+
+    def test_10_entry_delay_with_sparse_m1(self):
+        """Bước 3b kiểm tra: M1 thưa có khoảng cách phút giữa signal_time và entry_time tính đúng vào entry_delay."""
+        asia_times = pd.date_range("2024-01-15 00:00:00", periods=380, freq="1min")
+        df_asia = pd.DataFrame({
+            "time_utc": asia_times,
+            "open": np.full(380, 2040.0),
+            "high": np.full(380, 2050.0),
+            "low": np.full(380, 2030.0),
+            "close": np.full(380, 2040.0),
+            "atr": np.full(380, 10.0),
+        })
+
+        # Nến tín hiệu lúc 07:15, nhưng nến tiếp theo xuất hiện lúc 07:22 (trễ 7 phút)
+        df_session = pd.DataFrame({
+            "time_utc": [pd.Timestamp("2024-01-15 07:15:00"), pd.Timestamp("2024-01-15 07:22:00")],
+            "open": [2045.0, 2055.0],
+            "high": [2054.0, 2056.0],
+            "low": [2042.0, 2054.0],
+            "close": [2053.0, 2055.0],  # Close 2053 > 2051 -> Breakout BUY
+            "atr": [10.0, 10.0],
+        })
+
+        df_all = pd.concat([df_asia, df_session], ignore_index=True)
+        sigs = generate_breakout_signals(df_all)
+
+        self.assertEqual(len(sigs), 1)
+        sig = sigs.iloc[0]
+        self.assertEqual(sig["entry_delay"], 7, "entry_delay phải tính đúng 7 phút")
+        self.assertEqual(sig["entry_price"], 2055.0)
+
+    def test_11_summary_tracking_and_window_only_detection(self):
+        """Bước 3b kiểm tra: Trả về summary chính xác; khi chỉ truyền nến 07-13h thì cảnh báo và đếm đúng invalid."""
+        # Trường hợp 1: Truyền dữ liệu chỉ gồm cửa sổ 07:00-13:00 (thiếu hẳn phiên Á)
+        session_only_times = pd.date_range("2024-01-15 07:00:00", "2024-01-17 12:59:00", freq="1h")
+        df_session_only = pd.DataFrame({
+            "time_utc": session_only_times,
+            "open": np.full(len(session_only_times), 2050.0),
+            "high": np.full(len(session_only_times), 2055.0),
+            "low": np.full(len(session_only_times), 2045.0),
+            "close": np.full(len(session_only_times), 2050.0),
+            "atr": np.full(len(session_only_times), 10.0),
+        })
+
+        sigs_empty, summary = generate_breakout_signals(df_session_only, return_summary=True)
+        self.assertTrue(sigs_empty.empty)
+        self.assertEqual(summary["total_days"], 3)
+        self.assertEqual(summary["invalid_asian_days"], 3, "Cả 3 ngày đều không có nến phiên Á nên phải invalid")
+        self.assertEqual(summary["valid_signal_days"], 0)
+
+        # Kiểm tra summary cũng được gắn trong .attrs
+        self.assertEqual(sigs_empty.attrs["summary"], summary)
+
+    def test_12_signal_at_last_bar_counted_as_signal_without_entry(self):
+        """Bước 3b kiểm tra: Tín hiệu xuất hiện ở nến cuối cùng (12:59) không có nến kế tiếp trước 13:00."""
+        asia_times = pd.date_range("2024-01-15 00:00:00", periods=380, freq="1min")
+        df_asia = pd.DataFrame({
+            "time_utc": asia_times,
+            "open": np.full(380, 2040.0),
+            "high": np.full(380, 2050.0),
+            "low": np.full(380, 2030.0),
+            "close": np.full(380, 2040.0),
+            "atr": np.full(380, 10.0),
+        })
+
+        # Duy nhất 1 nến lúc 12:59:00 phá vỡ BUY, không còn nến nào sau đó
+        df_session = pd.DataFrame({
+            "time_utc": [pd.Timestamp("2024-01-15 12:59:00")],
+            "open": [2045.0],
+            "high": [2055.0],
+            "low": [2042.0],
+            "close": [2053.0],  # Breakout BUY
+            "atr": [10.0],
+        })
+
+        df_all = pd.concat([df_asia, df_session], ignore_index=True)
+        sigs, summary = generate_breakout_signals(df_all, return_summary=True)
+
+        self.assertTrue(sigs.empty, "Tín hiệu ở nến cuối cùng không có nến kế tiếp nên không vào lệnh")
+        self.assertEqual(summary["signal_without_entry_days"], 1, "Phải đếm 1 ngày có tín hiệu nhưng không có nến vào")
+        self.assertEqual(summary["valid_signal_days"], 0)
 
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
 
