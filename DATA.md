@@ -29,7 +29,7 @@ MT5 trả nến thô hơn khi không có M1, và chúng lẫn vào chuỗi M1:
 - Khoảng trống lớn trùng ngày lễ Mỹ và Giáng sinh/Năm mới.
 
 ## 5. Lưu ý khi dùng
-- **M1 2014-2016 thưa:** phút không có tick thì không có nến. Backtest phải coi phút thiếu là "giá không đổi" (forward-fill), không phải đứt dữ liệu.
+- **Độ phủ M1 2014-2016:** Độ phủ thực tế đạt khoảng 99% (không phải quá thưa như nhận định ban đầu). Phút không có tick thì không có nến; backtest coi phút thiếu là "giá không đổi" (forward-fill), không phải đứt dữ liệu.
 - **Giờ nghỉ 2014-2015** vẫn có nến: luật giao dịch phải tự loại giờ nghỉ, không dựa vào việc dữ liệu rỗng.
 - **Spread (points) trung vị theo năm:** 2014: 45 · 2015: 39 · 2016: 43 · 2017: 41 · 2018: 32 · 2019: 32 · 2020: 33 · 2021: 35 · 2022: 26 · 2023: 30 · 2024: 31 · 2025: 34 · 2026: 51. Tỷ lệ nến spread = 0 gần như không đáng kể. Phân vị 99 của 2020 là 268 (nhiều khả năng giai đoạn Covid). Spread gần đây (2026) rộng hơn hẳn.
 - Giá vàng thay đổi rất lớn giữa 2014 và 2026: mọi ngưỡng (SL/TP, khoảng cách vùng) phải tính theo ATR hoặc phần trăm, không theo giá tuyệt đối.
