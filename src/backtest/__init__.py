@@ -19,6 +19,18 @@ from .signals import (
     generate_breakout_signals,
 )
 
+from .simulate import (
+    DEFAULT_POINT,
+    DEFAULT_SLIP_POINTS,
+    DEFAULT_SPREAD_MULTIPLIER,
+    STRESS_SPREAD_POINTS,
+    YEARLY_MEDIAN_SPREADS,
+    compute_yearly_spread_medians,
+    get_effective_spread,
+    simulate_single_trade,
+    simulate_trades,
+)
+
 __all__ = [
     "M1Data",
     "load_m1",
@@ -33,7 +45,13 @@ __all__ = [
     "compute_asian_range",
     "generate_breakout_signals",
     "DEFAULT_MIN_ASIAN_BARS",
+    "DEFAULT_POINT",
+    "DEFAULT_SLIP_POINTS",
+    "DEFAULT_SPREAD_MULTIPLIER",
+    "STRESS_SPREAD_POINTS",
+    "YEARLY_MEDIAN_SPREADS",
+    "compute_yearly_spread_medians",
+    "get_effective_spread",
+    "simulate_single_trade",
+    "simulate_trades",
 ]
-
-
-
