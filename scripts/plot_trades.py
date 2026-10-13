@@ -32,7 +32,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from src.backtest.data import DEFAULT_DB_PATH
+from src.backtest.data import DEFAULT_DB_PATH, load_m1
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("plot_trades")
@@ -74,17 +74,11 @@ def select_sample_trades(trades_df: pd.DataFrame, n_total: int = 45) -> pd.DataF
 
 
 def load_day_m1_bars(date_str: str, db_path: Path = DEFAULT_DB_PATH) -> pd.DataFrame:
-    """Nạp nến M1 trong ngày từ 00:00:00 đến 17:00:00 UTC."""
+    """Nạp nến M1 trong ngày từ 00:00:00 đến 17:00:00 UTC thông qua load_m1 để đảm bảo chốt chặn an toàn."""
     start_ts = f"{date_str} 00:00:00"
     end_ts = f"{date_str} 17:00:00"
-    query = """
-        SELECT time_utc, open, high, low, close
-        FROM m1_utc
-        WHERE time_utc >= ? AND time_utc <= ?
-        ORDER BY time_utc
-    """
-    with duckdb.connect(str(db_path), read_only=True) as con:
-        df = con.execute(query, [start_ts, end_ts]).df()
+    m1_obj = load_m1(start_date=start_ts, end_date=end_ts, db_path=db_path, include_spread=False)
+    df = m1_obj.to_dataframe()
     df["time_utc"] = pd.to_datetime(df["time_utc"])
     return df
 
@@ -216,7 +210,7 @@ def generate_interactive_trade_report(
                 <span style="font-weight: bold; font-size: 16px; margin-left: 10px;">Lệnh #{trade_id} - {date_str} ({direction})</span>
                 <span style="float: right; font-size: 16px; font-weight: bold; color: {pnl_color_str};">{pnl_r:+.2f}R ({exit_reason})</span>
             </div>
-            {fig.to_html(include_plotlyjs="cdn" if idx == 0 else False, full_html=False)}
+            {fig.to_html(include_plotlyjs=False, full_html=False)}
         </div>
         """
         html_cards.append(card_html)
@@ -227,6 +221,7 @@ def generate_interactive_trade_report(
     <head>
         <meta charset="UTF-8">
         <title>Kiểm tra trực quan 30-50 lệnh (PROTOCOL.md Mục 7)</title>
+        <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
         <style>
             body {{
                 font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
