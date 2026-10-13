@@ -1,6 +1,6 @@
 # PROTOCOL.md — Giao thức kiểm thử bot GOLD
 
-**Trạng thái: BẢN NHÁP — CHƯA ĐÓNG BĂNG.**
+**Trạng thái: ĐÃ ĐÓNG BĂNG.**
 Chỉ có hiệu lực khi (1) bạn đã sửa/chốt mọi mục đánh dấu ⚠, (2) đổi trạng thái thành "ĐÃ ĐÓNG BĂNG", (3) commit git, và (4) ghi commit hash vào mục 8. Sau đó KHÔNG sửa; mọi thay đổi chỉ được thêm ở mục 9 (nhật ký) kèm lý do và ngày.
 
 ## 1. Mục tiêu
@@ -50,9 +50,9 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 - Quy ước phí cố định ngay từ đầu (tránh lặp lại lỗi tính phí giữa các script).
 
 ## 8. Đóng băng
-- Ngày đóng băng: ______
-- Commit hash: ______
-- Phiên bản `build_data.py`: 1.0 · `splits.json` commit: ______
+- Ngày đóng băng: 2026-10-13
+- Git tag: `protocol-v1`
+- Phiên bản `build_data.py`: 1.0 · `splits.json` commit: 7715bcf
 
 ## 9. Nhật ký thay đổi / đăng ký thử nghiệm
 | Ngày | N | Nội dung | Tiêu chí đăng ký trước | Kết quả |
