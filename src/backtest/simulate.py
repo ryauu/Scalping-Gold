@@ -1,43 +1,33 @@
 """Mô-đun simulate.py - Mô phỏng khớp lệnh và quản lý rủi ro (R-multiple).
 
-Quy ước giá (dữ liệu MT5 là giá Bid, point GOLD = 0.01):
-- BUY:
-  * Vào lệnh tại open_kế + spread + slip (mua ở Ask).
-  * SL kích hoạt khi bid low <= SL.
-  * TP kích hoạt khi bid high >= TP.
-  * Thoát ở mức - slip.
-- SELL:
-  * Vào lệnh tại open_kế - slip (bán ở Bid).
-  * SL kích hoạt theo Ask: bid high + spread >= SL.
-  * TP kích hoạt theo Ask: bid low + spread <= TP.
-  * Thoát ở mức + slip.
-- Spread: Trung vị spread của năm đó x 1,25 (tính 1 lần cho mỗi năm).
-- Trượt giá (slip): 5 points (0.05) mỗi lần khớp.
-- R_dist = |giá vào đã gồm chi phí - SL|.
-- TP = giá vào +- 2 x R_dist.
-- pnl_R = (giá thoát - giá vào) / R_dist (đảo dấu cho SELL).
-
-Thứ tự kiểm tra từng nến, từ chính nến vào lệnh đến 16:00 UTC:
-1. Nếu giá mở nến đã vượt SL (gap): thoát ở giá mở, lý do SL_GAP.
-2. Nếu nến chạm cả SL lẫn TP: tính SL (bảo thủ).
-3. Chạm SL hoặc TP: thoát ở mức kích hoạt trừ/cộng slip.
-4. Nến đầu tiên có giờ >= 16:00 UTC: thoát ở giá mở, lý do TIME.
-5. Hết dữ liệu trước 16:00 UTC: thoát ở giá đóng cuối, lý do DATA_END, và đếm các lệnh này.
-
-Quy ước bất đối xứng: Gap qua TP KHÔNG thưởng thêm, chỉ lấy đúng mức TP (bảo thủ, đã đăng ký tại PROTOCOL.md mục 9).
+Quy ước mô phỏng C3 (đã đăng ký tại PROTOCOL.md mục 9):
+- Dữ liệu M1 là giá bid; 1 point = 0,01.
+- Spread = trung vị spread năm đó x 1,25; slip = 5 points mỗi lần khớp (vào và ra); cột spread từng nến không dùng.
+- BUY vào tại Open nến kế + spread + slip; SELL vào tại Open nến kế - slip.
+- R_dist = |giá vào đã gồm chi phí - SL|; TP = giá vào +- 2 x R_dist.
+- Kích hoạt:
+  * BUY: SL khi bid low <= SL, TP khi bid high >= TP.
+  * SELL: SL khi bid high + spread >= SL, TP khi bid low + spread <= TP.
+- Thoát tại mức kích hoạt: BUY trừ slip, SELL cộng slip.
+- Kiểm tra từ chính nến vào lệnh.
+- Gap qua SL: thoát tại Open (BUY: Open - slip; SELL: Open + spread + slip), lý do SL_GAP.
+- Gap qua TP: chỉ lấy đúng mức TP (bảo thủ, bất đối xứng có chủ đích).
+- Chạm cả hai trong một nến: tính SL.
+- Thoát cứng: nến đầu tiên có giờ >= 16:00 UTC, tại Open (BUY: - slip; SELL: + spread + slip), lý do TIME.
+- Hết dữ liệu trước 16:00: thoát tại Close nến cuối (BUY: - slip; SELL: + spread + slip), ghi DATA_END và đếm.
+- entry_delay được ghi lại, không dùng để lọc.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 import pandas as pd
 
-from .data import DEFAULT_DB_PATH, M1Data
+from .data import M1Data
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +37,7 @@ DEFAULT_SLIP_POINTS: float = 5.0
 DEFAULT_SPREAD_MULTIPLIER: float = 1.25
 STRESS_SPREAD_POINTS: float = 51.0
 
-# Bảng trung vị spread theo năm (DATA.md mục 5, kiểm chứng từ meta.duckdb)
+# Bảng trung vị spread theo năm (DATA.md mục 5) — NGUỒN DUY NHẤT CỐ ĐỊNH, KHÔNG TRUY VẤN RUNTIME
 YEARLY_MEDIAN_SPREADS: dict[int, float] = {
     2014: 45.0,
     2015: 39.0,
@@ -66,48 +56,38 @@ YEARLY_MEDIAN_SPREADS: dict[int, float] = {
 
 
 def compute_yearly_spread_medians(db_path: Path | str | None = None) -> dict[int, float]:
-    """Tính trung vị spread theo năm từ DuckDB view m1_utc.
+    """Trả về bảng trung vị spread theo năm cố định từ YEARLY_MEDIAN_SPREADS (khớp DATA.md).
 
-    Nếu không tìm thấy file DuckDB hoặc có lỗi kết nối, dự phòng sang bảng YEARLY_MEDIAN_SPREADS.
+    Lưu ý: Không truy vấn runtime trực tiếp vào DuckDB để tránh vi phạm chốt chặn
+    và rò rỉ dữ liệu Holdout của năm 2025/2026.
     """
-    resolved_db = Path(db_path) if db_path is not None else DEFAULT_DB_PATH
-    if not resolved_db.exists():
-        if Path("data/meta.duckdb").exists():
-            resolved_db = Path("data/meta.duckdb")
-        else:
-            return dict(YEARLY_MEDIAN_SPREADS)
-
-    try:
-        import duckdb
-
-        with duckdb.connect(str(resolved_db), read_only=True) as con:
-            rows = con.execute(
-                "SELECT year, median(spread) as med FROM m1_utc GROUP BY year ORDER BY year"
-            ).fetchall()
-            return {int(r[0]): float(r[1]) for r in rows}
-    except Exception as exc:
-        logger.warning("Không thể đọc trung vị spread từ DuckDB (%s), dùng bảng dự phòng.", exc)
-        return dict(YEARLY_MEDIAN_SPREADS)
+    return dict(YEARLY_MEDIAN_SPREADS)
 
 
 def get_effective_spread(
     year: int,
     multiplier: float = DEFAULT_SPREAD_MULTIPLIER,
     point: float = DEFAULT_POINT,
-    yearly_medians: dict[int, float] | None = None,
     stress_points: float | None = None,
 ) -> float:
     """Tính mức spread hiệu dụng quy đổi ra giá cho một năm.
 
-    Công thức:
-    - Mặc định: spread_price = trung vị spread năm đó * multiplier * point.
+    Công thức theo C3 & PROTOCOL.md:
     - Kịch bản stress (nếu stress_points được truyền): spread_price = stress_points * point.
+    - Mặc định: spread_price = trung vị spread năm đó * multiplier * point.
+      Sử dụng YEARLY_MEDIAN_SPREADS (khớp DATA.md) làm nguồn duy nhất.
+      Nếu thiếu năm, báo lỗi KeyError rõ ràng, không âm thầm điền giá trị giả định.
     """
     if stress_points is not None:
         return float(stress_points * point)
 
-    medians = yearly_medians if yearly_medians is not None else YEARLY_MEDIAN_SPREADS
-    med = medians.get(year, 35.0)
+    if year not in YEARLY_MEDIAN_SPREADS:
+        raise KeyError(
+            f"Năm {year} không có trong bảng trung vị spread YEARLY_MEDIAN_SPREADS (xem DATA.md). "
+            f"Các năm hợp lệ: {sorted(YEARLY_MEDIAN_SPREADS.keys())}."
+        )
+
+    med = YEARLY_MEDIAN_SPREADS[year]
     return float(med * multiplier * point)
 
 
@@ -123,26 +103,36 @@ def simulate_single_trade(
     tp: float | None = None,
     trade_date: pd.Timestamp | str | None = None,
     year: int | None = None,
+    signal_time: pd.Timestamp | str | None = None,
+    entry_delay: int | None = None,
+    atr: float | None = None,
+    asia_high: float | None = None,
+    asia_low: float | None = None,
 ) -> dict[str, Any]:
     """Mô phỏng khớp lệnh chi tiết cho 1 giao dịch đơn lẻ từ entry_time đến 16:00 UTC.
+
+    Hỗ trợ cả DataFrame và M1Data.
 
     Tham số:
         direction: "BUY" hoặc "SELL".
         entry_time: Thời điểm nến M1 vào lệnh (Open).
         entry_open: Giá Open của nến M1 tại entry_time (giá Bid MT5).
         sl: Mức dừng lỗ Stop Loss ban đầu.
-        m1_bars: Dữ liệu nến M1 chứa các nến từ entry_time đến 16:00 (DataFrame hoặc M1Data).
-        spread: Spread tính theo giá (ví dụ: 31 * 1.25 * 0.01 = 0.3875).
-        slip: Trượt giá mỗi lần khớp tính theo giá (ví dụ: 5 * 0.01 = 0.05).
+        m1_bars: Dữ liệu nến M1 (DataFrame hoặc M1Data).
+        spread: Spread tính theo giá.
+        slip: Trượt giá mỗi lần khớp tính theo giá.
         point: Kích thước point của GOLD (mặc định 0.01).
         tp: Mức chốt lời Take Profit (nếu None, tự tính entry_price +- 2 * R_dist).
         trade_date: Ngày giao dịch (Timestamp hoặc chuỗi).
         year: Năm giao dịch (int).
+        signal_time: Thời điểm sinh tín hiệu (tùy chọn để đối chiếu trực quan).
+        entry_delay: Độ trễ vào lệnh tính bằng phút (tùy chọn).
+        atr: Giá trị ATR tại nến tín hiệu (tùy chọn).
+        asia_high: Đỉnh vùng Á (tùy chọn).
+        asia_low: Đáy vùng Á (tùy chọn).
 
     Trả về:
-        dict chứa:
-        - date, direction, entry_time, entry_price, exit_time, exit_price,
-          sl, tp, r_dist, exit_reason, pnl_r, spread, year
+        dict chứa đầy đủ thông tin giao dịch phục vụ thống kê và kiểm tra trực quan.
     """
     dir_clean = str(direction).strip().upper()
     if dir_clean not in ("BUY", "SELL"):
@@ -172,9 +162,9 @@ def simulate_single_trade(
             raise ValueError(f"R_dist <= 0 cho SELL: entry_price={entry_price}, sl={sl}")
         calc_tp = float(entry_price - 2.0 * r_dist) if tp is None else float(tp)
 
-    # 2. Chuẩn bị mảng nến M1
+    # 2. Chuẩn bị mảng nến M1 (bọc bằng pd.Series để đảm bảo có .dt.tz kể cả khi nhận M1Data)
     if isinstance(m1_bars, M1Data):
-        time_series = pd.to_datetime(m1_bars.time)
+        time_series = pd.Series(pd.to_datetime(m1_bars.time))
         opens = np.asarray(m1_bars.open, dtype=np.float64)
         highs = np.asarray(m1_bars.high, dtype=np.float64)
         lows = np.asarray(m1_bars.low, dtype=np.float64)
@@ -182,7 +172,7 @@ def simulate_single_trade(
     elif isinstance(m1_bars, pd.DataFrame):
         if "time_utc" not in m1_bars.columns:
             raise KeyError("Dữ liệu nến M1 cần có cột 'time_utc'")
-        time_series = pd.to_datetime(m1_bars["time_utc"])
+        time_series = pd.Series(pd.to_datetime(m1_bars["time_utc"]))
         opens = m1_bars["open"].to_numpy(dtype=np.float64)
         highs = m1_bars["high"].to_numpy(dtype=np.float64)
         lows = m1_bars["low"].to_numpy(dtype=np.float64)
@@ -327,16 +317,30 @@ def simulate_single_trade(
     else:
         pnl_r = float((entry_price - exit_price) / r_dist)
 
+    # Chuẩn bị các cột hỗ trợ đối chiếu hình ảnh / kiểm tra trực quan
+    sig_time_val = pd.to_datetime(signal_time) if signal_time is not None else None
+    delay_val = int(entry_delay) if (entry_delay is not None and pd.notna(entry_delay)) else 0
+    atr_val = float(atr) if (atr is not None and pd.notna(atr)) else np.nan
+    r_atr_ratio = float(r_dist / atr_val) if (not np.isnan(atr_val) and atr_val > 0) else np.nan
+    asia_high_val = float(asia_high) if (asia_high is not None and pd.notna(asia_high)) else np.nan
+    asia_low_val = float(asia_low) if (asia_low is not None and pd.notna(asia_low)) else np.nan
+
     return {
         "date": trade_date_ts,
         "direction": dir_clean,
+        "signal_time": sig_time_val,
         "entry_time": entry_time_ts,
+        "entry_delay": delay_val,
         "entry_price": float(entry_price),
         "exit_time": exit_time,
         "exit_price": float(exit_price),
         "sl": float(sl),
         "tp": float(calc_tp),
         "r_dist": float(r_dist),
+        "atr": atr_val,
+        "r_atr_ratio": r_atr_ratio,
+        "asia_high": asia_high_val,
+        "asia_low": asia_low_val,
         "exit_reason": exit_reason,
         "pnl_r": float(pnl_r),
         "spread": float(spread),
@@ -358,10 +362,13 @@ def simulate_trades(
 ) -> pd.DataFrame | tuple[pd.DataFrame, dict[str, Any]]:
     """Mô phỏng toàn bộ các lệnh từ tín hiệu phá vỡ (Breakout signals).
 
+    Giữ lại đầy đủ các cột tín hiệu (signal_time, entry_delay, atr, asia_high, asia_low, r_atr_ratio)
+    để hỗ trợ dựng lại biểu đồ kiểm tra bằng mắt (30-50 lệnh) theo PROTOCOL.md mục 7.
+
     Tham số:
         signals: DataFrame chứa các tín hiệu phá vỡ sinh từ generate_breakout_signals.
         m1: Dữ liệu nến M1 (DataFrame hoặc M1Data).
-        db_path: Đường dẫn tới meta.duckdb (tùy chọn).
+        db_path: Không còn sử dụng (giữ lại tham số để tương thích ngược).
         point: Kích thước point của GOLD (mặc định 0.01).
         spread_multiplier: Hệ số nhân spread theo năm (mặc định 1.25).
         slip_points: Trượt giá mỗi lần khớp tính theo points (mặc định 5.0 points = 0.05).
@@ -376,13 +383,19 @@ def simulate_trades(
     columns_out = [
         "date",
         "direction",
+        "signal_time",
         "entry_time",
+        "entry_delay",
         "entry_price",
         "exit_time",
         "exit_price",
         "sl",
         "tp",
         "r_dist",
+        "atr",
+        "r_atr_ratio",
+        "asia_high",
+        "asia_low",
         "exit_reason",
         "pnl_r",
         "spread",
@@ -396,6 +409,7 @@ def simulate_trades(
         "n_sl_gap": 0,
         "n_time": 0,
         "n_data_end": 0,
+        "n_skipped": 0,
         "win_rate": 0.0,
         "sum_pnl_r": 0.0,
         "mean_pnl_r": 0.0,
@@ -418,9 +432,6 @@ def simulate_trades(
     m1_df["time_utc"] = pd.to_datetime(m1_df["time_utc"])
     m1_df["trade_date"] = m1_df["time_utc"].dt.floor("D")
 
-    # Tải bảng trung vị spread nếu không dùng fixed_spread
-    yearly_medians = compute_yearly_spread_medians(db_path) if fixed_spread is None else None
-
     # Lọc M1 chỉ giữ các ngày có tín hiệu để tăng tốc độ groupby
     signal_dates = set(pd.to_datetime(signals["date"]).dt.floor("D"))
     m1_filtered = m1_df[m1_df["trade_date"].isin(signal_dates)]
@@ -431,6 +442,7 @@ def simulate_trades(
     slip_val = fixed_slip if fixed_slip is not None else float(slip_points * point)
 
     records: list[dict[str, Any]] = []
+    n_skipped: int = 0
 
     for _, row in signals.iterrows():
         trade_date = pd.Timestamp(row["date"]).floor("D")
@@ -447,7 +459,6 @@ def simulate_trades(
             sl = float(row["asia_high"])
 
         tp = float(row["tp"]) if ("tp" in row and pd.notna(row["tp"])) else None
-
         year = trade_date.year
 
         # Tính spread cho lệnh
@@ -460,12 +471,12 @@ def simulate_trades(
                 year,
                 multiplier=spread_multiplier,
                 point=point,
-                yearly_medians=yearly_medians,
             )
 
         day_bars = grouped_m1.get(trade_date)
         if day_bars is None or day_bars.empty:
             logger.warning("Không có nến M1 cho ngày %s, bỏ qua lệnh.", trade_date.date())
+            n_skipped += 1
             continue
 
         trade_res = simulate_single_trade(
@@ -480,6 +491,11 @@ def simulate_trades(
             tp=tp,
             trade_date=trade_date,
             year=year,
+            signal_time=row.get("signal_time"),
+            entry_delay=row.get("entry_delay"),
+            atr=row.get("atr"),
+            asia_high=row.get("asia_high"),
+            asia_low=row.get("asia_low"),
         )
         records.append(trade_res)
 
@@ -508,6 +524,7 @@ def simulate_trades(
         "n_sl_gap": n_sl_gap,
         "n_time": n_time,
         "n_data_end": n_data_end,
+        "n_skipped": n_skipped,
         "win_rate": win_rate,
         "sum_pnl_r": sum_pnl_r,
         "mean_pnl_r": mean_pnl_r,

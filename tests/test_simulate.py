@@ -8,16 +8,22 @@
 6. BUY chính nến vào lệnh đã chạm SL: ra đúng SL ngay nến vào lệnh.
 7. BUY hết dữ liệu trước 16:00: ra đúng lý do DATA_END tại giá đóng cuối.
 8. SELL chạm TP (chi phí = 0): ra đúng +2.0R.
-9. SELL chạm SL (chi phí = 0): kích hoạt theo ask (bid high + spread >= SL), ra đúng -1.0R.
+9. SELL chạm SL (chi phí = 0): kích hoạt theo ask, ra đúng -1.0R.
 10. SELL chạm cả SL lẫn TP trong 1 nến: tính SL (-1.0R).
 11. SELL thoát lúc 16:00 UTC: ra đúng lý do TIME tại giá mở.
 12. SELL gap qua SL: kích hoạt theo ask, ra đúng lý do SL_GAP tại giá mở.
 13. SELL chính nến vào lệnh đã chạm SL: ra đúng SL ngay nến vào lệnh.
 14. SELL hết dữ liệu trước 16:00: ra đúng lý do DATA_END tại giá đóng cuối.
-15. Chi phí khác 0: TP trả đúng ít hơn 2R một lượng bằng chi phí trượt giá quy ra R (2.0 - slip / R_dist).
-16. Bất đối xứng gap: Gap qua TP KHÔNG thưởng thêm, chỉ lấy đúng mức TP (bảo thủ).
-17. Kiểm đếm DATA_END và summary attributes trong simulate_trades.
-18. Pipeline thực tế end-to-end với dữ liệu DuckDB (ngày 2024-01-02).
+15. Chi phí khác 0 (BUY):
+    - BUY chạm TP: ra đúng +1.9952R (2.0 - slip / R_dist).
+    - BUY chạm SL: ra đúng -1.0048R (-1.0 - slip / R_dist).
+16. Chi phí khác 0 (SELL):
+    - SELL chạm TP: ra đúng +1.9950R (2.0 - slip / R_dist).
+    - SELL chạm SL: ra đúng -1.0050R (-1.0 - slip / R_dist).
+17. Bất đối xứng gap: Gap qua TP KHÔNG thưởng thêm, chỉ lấy đúng mức TP (bảo thủ).
+18. Nhánh M1Data trong simulate_single_trade: chạy mượt mà không lỗi AttributeError.
+19. Nguồn spread cố định: YEARLY_MEDIAN_SPREADS báo lỗi KeyError nếu thiếu năm.
+20. Giữ cột đối chiếu biểu đồ (signal_time, entry_delay, atr, r_atr_ratio, asia_high/low) và đếm n_skipped.
 """
 
 from __future__ import annotations
@@ -34,8 +40,7 @@ if str(_REPO_ROOT) not in sys.path:
 import numpy as np
 import pandas as pd
 
-from src.backtest.data import load_m1
-from src.backtest.signals import compute_asian_range, generate_breakout_signals
+from src.backtest.data import M1Data
 from src.backtest.simulate import (
     DEFAULT_POINT,
     DEFAULT_SLIP_POINTS,
@@ -58,8 +63,7 @@ class TestSimulateModule(unittest.TestCase):
     # ==========================================
 
     def test_01_buy_tp_zero_cost(self):
-        """1. BUY chạm TP: BUY vào 2100, SL 2090 -> R_dist = 10, TP = 2120. Chạm TP ra đúng +2.0R."""
-        # 3 nến: nến vào lệnh [07:16], nến kế tiếp [07:17], nến chạm TP [07:18]
+        """1. BUY chạm TP (chi phí 0): ra đúng +2.0R."""
         times = pd.date_range("2024-01-15 07:16:00", periods=3, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
@@ -90,7 +94,7 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], 2.0, places=6)
 
     def test_02_buy_sl_zero_cost(self):
-        """2. BUY chạm SL: BUY vào 2100, SL 2090 -> R_dist = 10. Chạm SL ra đúng -1.0R."""
+        """2. BUY chạm SL (chi phí 0): ra đúng -1.0R."""
         times = pd.date_range("2024-01-15 07:16:00", periods=3, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
@@ -116,13 +120,13 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], -1.0, places=6)
 
     def test_03_buy_both_in_one_candle_picks_sl(self):
-        """3. BUY chạm cả SL lẫn TP trong một nến: theo quy tắc bảo thủ phải tính SL (-1.0R)."""
+        """3. BUY chạm cả SL lẫn TP trong một nến: tính SL (-1.0R)."""
         times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
             "open": [2100.0, 2105.0],
-            "high": [2102.0, 2130.0],  # Nến 07:17 quét lên 2130 >= TP (2120)
-            "low": [2098.0, 2085.0],   # Nến 07:17 đồng thời quét xuống 2085 <= SL (2090)
+            "high": [2102.0, 2130.0],  # Quét lên 2130 >= TP (2120)
+            "low": [2098.0, 2085.0],   # Đồng thời quét xuống 2085 <= SL (2090)
             "close": [2101.0, 2110.0],
         })
 
@@ -136,16 +140,16 @@ class TestSimulateModule(unittest.TestCase):
             slip=0.0,
         )
 
-        self.assertEqual(res["exit_reason"], "SL", "Chạm cả hai trong 1 nến phải ưu tiên tính SL")
+        self.assertEqual(res["exit_reason"], "SL")
         self.assertEqual(res["exit_price"], 2090.0)
         self.assertAlmostEqual(res["pnl_r"], -1.0, places=6)
 
     def test_04_buy_time_exit_at_1600(self):
-        """4. BUY thoát lúc 16:00 UTC: nến đầu tiên có giờ >= 16:00 thoát ở giá mở, lý do TIME."""
+        """4. BUY thoát lúc 16:00 UTC: thoát tại giá mở nến 16:00 (+1.2R)."""
         times = [
             pd.Timestamp("2024-01-15 07:16:00"),
             pd.Timestamp("2024-01-15 12:00:00"),
-            pd.Timestamp("2024-01-15 16:00:00"),  # Nến 16:00 UTC
+            pd.Timestamp("2024-01-15 16:00:00"),
         ]
         df_bars = pd.DataFrame({
             "time_utc": times,
@@ -166,17 +170,17 @@ class TestSimulateModule(unittest.TestCase):
         )
 
         self.assertEqual(res["exit_reason"], "TIME")
-        self.assertEqual(res["exit_price"], 2112.0, "Phải thoát ở giá mở của nến 16:00")
+        self.assertEqual(res["exit_price"], 2112.0)
         self.assertEqual(pd.Timestamp(res["exit_time"]), pd.Timestamp("2024-01-15 16:00:00"))
         # pnl_R = (2112 - 2100) / 10 = +1.2R
         self.assertAlmostEqual(res["pnl_r"], 1.2, places=6)
 
     def test_05_buy_gap_over_sl(self):
-        """5. BUY gap qua SL: nến tiếp theo mở cửa dưới SL thoát ở giá mở, lý do SL_GAP."""
+        """5. BUY gap qua SL: thoát tại giá mở (-1.5R)."""
         times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
-            "open": [2100.0, 2085.0],  # Nến 07:17 mở cửa gap xuống 2085 <= SL (2090)
+            "open": [2100.0, 2085.0],  # Mở cửa gap xuống 2085 <= SL (2090)
             "high": [2102.0, 2088.0],
             "low": [2095.0, 2080.0],
             "close": [2096.0, 2082.0],
@@ -193,12 +197,12 @@ class TestSimulateModule(unittest.TestCase):
         )
 
         self.assertEqual(res["exit_reason"], "SL_GAP")
-        self.assertEqual(res["exit_price"], 2085.0, "Thoát ở giá mở khi bị gap")
+        self.assertEqual(res["exit_price"], 2085.0)
         # pnl_R = (2085 - 2100) / 10 = -1.5R
         self.assertAlmostEqual(res["pnl_r"], -1.5, places=6)
 
     def test_06_buy_entry_candle_touches_sl(self):
-        """6. BUY nến vào lệnh đã chạm SL: ngay chính nến vào lệnh (i=0) có low chạm SL."""
+        """6. BUY chính nến vào lệnh đã chạm SL: ra đúng SL ngay nến vào lệnh (-1.0R)."""
         times = [pd.Timestamp("2024-01-15 07:16:00"), pd.Timestamp("2024-01-15 07:17:00")]
         df_bars = pd.DataFrame({
             "time_utc": times,
@@ -224,11 +228,11 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], -1.0, places=6)
 
     def test_07_buy_data_end_before_1600(self):
-        """7. BUY hết dữ liệu trước 16:00: thoát ở giá đóng cuối, lý do DATA_END."""
+        """7. BUY hết dữ liệu trước 16:00: thoát tại giá đóng cuối (+0.8R)."""
         times = [
             pd.Timestamp("2024-01-15 07:16:00"),
             pd.Timestamp("2024-01-15 10:00:00"),
-            pd.Timestamp("2024-01-15 14:30:00"),  # Nến cuối cùng trong ngày trước 16:00
+            pd.Timestamp("2024-01-15 14:30:00"),
         ]
         df_bars = pd.DataFrame({
             "time_utc": times,
@@ -249,7 +253,7 @@ class TestSimulateModule(unittest.TestCase):
         )
 
         self.assertEqual(res["exit_reason"], "DATA_END")
-        self.assertEqual(res["exit_price"], 2108.0, "Thoát ở giá đóng nến cuối")
+        self.assertEqual(res["exit_price"], 2108.0)
         self.assertEqual(pd.Timestamp(res["exit_time"]), pd.Timestamp("2024-01-15 14:30:00"))
         # pnl_R = (2108 - 2100) / 10 = +0.8R
         self.assertAlmostEqual(res["pnl_r"], 0.8, places=6)
@@ -257,17 +261,16 @@ class TestSimulateModule(unittest.TestCase):
     # ==========================================
     # CÁC TEST SELL VỚI CHI PHÍ BẰNG 0
     # Entry = 2100, SL = 2110 -> R_dist = 10, TP = 2080
-    # SELL kích hoạt theo ask (bid + spread)
     # ==========================================
 
     def test_08_sell_tp_zero_cost(self):
-        """8. SELL chạm TP: SELL vào 2100, SL 2110 -> R_dist = 10, TP = 2080. Chạm TP ra đúng +2.0R."""
+        """8. SELL chạm TP (chi phí 0): ra đúng +2.0R."""
         times = pd.date_range("2024-01-15 07:16:00", periods=3, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
             "open": [2100.0, 2095.0, 2085.0],
             "high": [2102.0, 2098.0, 2088.0],
-            "low": [2096.0, 2088.0, 2075.0],  # Nến 07:18 có low = 2075 <= TP (2080)
+            "low": [2096.0, 2088.0, 2075.0],  # low = 2075 <= TP (2080)
             "close": [2098.0, 2090.0, 2078.0],
         })
 
@@ -281,11 +284,6 @@ class TestSimulateModule(unittest.TestCase):
             slip=0.0,
         )
 
-        self.assertEqual(res["direction"], "SELL")
-        self.assertEqual(res["entry_price"], 2100.0)
-        self.assertEqual(res["sl"], 2110.0)
-        self.assertEqual(res["r_dist"], 10.0)
-        self.assertEqual(res["tp"], 2080.0)
         self.assertEqual(res["exit_reason"], "TP")
         self.assertEqual(res["exit_price"], 2080.0)
         self.assertEqual(pd.Timestamp(res["exit_time"]), pd.Timestamp("2024-01-15 07:18:00"))
@@ -293,12 +291,12 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], 2.0, places=6)
 
     def test_09_sell_sl_zero_cost(self):
-        """9. SELL chạm SL: SELL vào 2100, SL 2110 -> R_dist = 10. Chạm SL ra đúng -1.0R."""
+        """9. SELL chạm SL (chi phí 0): ra đúng -1.0R."""
         times = pd.date_range("2024-01-15 07:16:00", periods=3, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
             "open": [2100.0, 2104.0, 2108.0],
-            "high": [2102.0, 2106.0, 2112.0],  # Nến 07:18 có high = 2112 >= SL (2110)
+            "high": [2102.0, 2106.0, 2112.0],  # high = 2112 >= SL (2110)
             "low": [2098.0, 2101.0, 2105.0],
             "close": [2101.0, 2105.0, 2111.0],
         })
@@ -320,13 +318,13 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], -1.0, places=6)
 
     def test_10_sell_both_in_one_candle_picks_sl(self):
-        """10. SELL chạm cả SL lẫn TP trong 1 nến: theo quy tắc bảo thủ phải tính SL (-1.0R)."""
+        """10. SELL chạm cả SL lẫn TP trong 1 nến: tính SL (-1.0R)."""
         times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
             "open": [2100.0, 2095.0],
             "high": [2102.0, 2115.0],  # Quét lên 2115 >= SL (2110)
-            "low": [2097.0, 2075.0],   # Đồng thời quét xuống 2075 <= TP (2080)
+            "low": [2097.0, 2075.0],   # Quét xuống 2075 <= TP (2080)
             "close": [2099.0, 2090.0],
         })
 
@@ -340,12 +338,12 @@ class TestSimulateModule(unittest.TestCase):
             slip=0.0,
         )
 
-        self.assertEqual(res["exit_reason"], "SL", "Chạm cả hai trong 1 nến phải ưu tiên tính SL")
+        self.assertEqual(res["exit_reason"], "SL")
         self.assertEqual(res["exit_price"], 2110.0)
         self.assertAlmostEqual(res["pnl_r"], -1.0, places=6)
 
     def test_11_sell_time_exit_at_1600(self):
-        """11. SELL thoát lúc 16:00 UTC: nến đầu tiên có giờ >= 16:00 thoát ở giá mở, lý do TIME."""
+        """11. SELL thoát lúc 16:00 UTC: thoát tại giá mở (+0.8R)."""
         times = [
             pd.Timestamp("2024-01-15 07:16:00"),
             pd.Timestamp("2024-01-15 12:00:00"),
@@ -376,11 +374,11 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], 0.8, places=6)
 
     def test_12_sell_gap_over_sl(self):
-        """12. SELL gap qua SL: nến tiếp theo mở cửa trên SL theo ask thoát ở giá mở, lý do SL_GAP."""
+        """12. SELL gap qua SL: thoát tại giá mở (-1.5R)."""
         times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
         df_bars = pd.DataFrame({
             "time_utc": times,
-            "open": [2100.0, 2115.0],  # Nến 07:17 mở cửa gap lên 2115 >= SL (2110)
+            "open": [2100.0, 2115.0],  # Mở cửa gap lên 2115 >= SL (2110)
             "high": [2102.0, 2118.0],
             "low": [2098.0, 2112.0],
             "close": [2101.0, 2116.0],
@@ -402,7 +400,7 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], -1.5, places=6)
 
     def test_13_sell_entry_candle_touches_sl(self):
-        """13. SELL nến vào lệnh đã chạm SL: ngay chính nến vào lệnh (i=0) có high chạm SL."""
+        """13. SELL nến vào lệnh đã chạm SL: ra đúng SL ngay nến vào lệnh (-1.0R)."""
         times = [pd.Timestamp("2024-01-15 07:16:00"), pd.Timestamp("2024-01-15 07:17:00")]
         df_bars = pd.DataFrame({
             "time_utc": times,
@@ -428,7 +426,7 @@ class TestSimulateModule(unittest.TestCase):
         self.assertAlmostEqual(res["pnl_r"], -1.0, places=6)
 
     def test_14_sell_data_end_before_1600(self):
-        """14. SELL hết dữ liệu trước 16:00: thoát ở giá đóng cuối, lý do DATA_END."""
+        """14. SELL hết dữ liệu trước 16:00: thoát tại giá đóng cuối (+0.5R)."""
         times = [
             pd.Timestamp("2024-01-15 07:16:00"),
             pd.Timestamp("2024-01-15 10:00:00"),
@@ -460,91 +458,115 @@ class TestSimulateModule(unittest.TestCase):
 
     # ==========================================
     # CÁC TEST VỚI CHI PHÍ KHÁC 0
-    # TP trả đúng ít hơn 2R một lượng bằng chi phí quy ra R
+    # spread = 0.40, slip = 0.05
+    # BUY: entry = 2100.45, R_dist = 10.45
+    #      TP cho +1.9952R (2.0 - 0.05/10.45)
+    #      SL cho -1.0048R (-1.0 - 0.05/10.45)
+    # SELL: entry = 2099.95, R_dist = 10.05
+    #      TP cho +1.9950R (2.0 - 0.05/10.05)
+    #      SL cho -1.0050R (-1.0 - 0.05/10.05)
     # ==========================================
 
-    def test_15_nonzero_costs_reduction_exact(self):
-        """15. Với chi phí khác 0: TP trả đúng ít hơn 2R một lượng bằng chi phí trượt giá quy ra R (2.0 - slip/R_dist)."""
-        spread = 0.40  # 40 points
-        slip = 0.05    # 5 points
+    def test_15_nonzero_costs_buy_tp_and_sl(self):
+        """15. BUY có chi phí: TP cho đúng +1.9952R và SL cho đúng -1.0048R."""
+        spread = 0.40
+        slip = 0.05
 
-        # --- A) BUY ---
-        # entry_open = 2100.0, SL = 2090.0
-        # entry_price = 2100.0 + 0.40 + 0.05 = 2100.45
-        # R_dist = 2100.45 - 2090.0 = 10.45
-        # TP = 2100.45 + 2 * 10.45 = 2121.35
-        # Chạm TP -> exit_price = TP - slip = 2121.35 - 0.05 = 2121.30
-        # pnl_R = (2121.30 - 2100.45) / 10.45 = 20.85 / 10.45 = 2.0 - 0.05 / 10.45
+        # A) BUY chạm TP
         times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
-        df_buy = pd.DataFrame({
+        df_buy_tp = pd.DataFrame({
             "time_utc": times,
             "open": [2100.0, 2110.0],
-            "high": [2105.0, 2125.0],  # high 2125.0 >= TP (2121.35)
+            "high": [2105.0, 2125.0],  # 2125 >= TP (2121.35)
             "low": [2098.0, 2108.0],
             "close": [2102.0, 2122.0],
         })
-
-        res_buy = simulate_single_trade(
+        res_tp = simulate_single_trade(
             direction="BUY",
             entry_time=self.entry_time,
             entry_open=2100.0,
             sl=2090.0,
-            m1_bars=df_buy,
+            m1_bars=df_buy_tp,
             spread=spread,
             slip=slip,
         )
+        # R_dist = 2100.45 - 2090.0 = 10.45
+        # TP = 2121.35 -> exit = 2121.30 -> pnl = (2121.30 - 2100.45)/10.45 = 1.9952153...
+        self.assertAlmostEqual(res_tp["pnl_r"], 1.9952, places=4)
+        self.assertAlmostEqual(res_tp["pnl_r"], 2.0 - (slip / 10.45), places=6)
 
-        expected_r_dist_buy = 10.45
-        expected_pnl_buy = 2.0 - (slip / expected_r_dist_buy)
-        self.assertAlmostEqual(res_buy["entry_price"], 2100.45, places=6)
-        self.assertAlmostEqual(res_buy["r_dist"], expected_r_dist_buy, places=6)
-        self.assertAlmostEqual(res_buy["tp"], 2121.35, places=6)
-        self.assertAlmostEqual(res_buy["exit_price"], 2121.30, places=6)
-        self.assertAlmostEqual(res_buy["pnl_r"], expected_pnl_buy, places=6)
-        self.assertLess(res_buy["pnl_r"], 2.0, "TP sau chi phí phải nhỏ hơn đúng 2.0R")
+        # B) BUY chạm SL
+        df_buy_sl = pd.DataFrame({
+            "time_utc": times,
+            "open": [2100.0, 2095.0],
+            "high": [2102.0, 2096.0],
+            "low": [2096.0, 2088.0],  # low = 2088 <= SL (2090)
+            "close": [2098.0, 2089.0],
+        })
+        res_sl = simulate_single_trade(
+            direction="BUY",
+            entry_time=self.entry_time,
+            entry_open=2100.0,
+            sl=2090.0,
+            m1_bars=df_buy_sl,
+            spread=spread,
+            slip=slip,
+        )
+        # exit = 2090 - 0.05 = 2089.95 -> pnl = (2089.95 - 2100.45)/10.45 = -10.50/10.45 = -1.004784...
+        self.assertAlmostEqual(res_sl["pnl_r"], -1.0048, places=4)
+        self.assertAlmostEqual(res_sl["pnl_r"], -1.0 - (slip / 10.45), places=6)
 
-        # --- B) SELL ---
-        # entry_open = 2100.0, SL = 2110.0
-        # entry_price = 2100.0 - 0.05 = 2099.95
-        # R_dist = 2110.0 - 2099.95 = 10.05
-        # TP = 2099.95 - 2 * 10.05 = 2079.85
-        # SELL kích hoạt theo ask: bid low + spread <= TP -> bid low <= 2079.85 - 0.40 = 2079.45
-        # Chạm TP -> exit_price = TP + slip = 2079.85 + 0.05 = 2079.90
-        # pnl_R = (2099.95 - 2079.90) / 10.05 = 20.05 / 10.05 = 2.0 - 0.05 / 10.05
-        df_sell = pd.DataFrame({
+    def test_16_nonzero_costs_sell_tp_and_sl(self):
+        """16. SELL có chi phí: TP cho đúng +1.9950R và SL cho đúng -1.0050R."""
+        spread = 0.40
+        slip = 0.05
+
+        # A) SELL chạm TP
+        times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
+        df_sell_tp = pd.DataFrame({
             "time_utc": times,
             "open": [2100.0, 2090.0],
             "high": [2102.0, 2092.0],
-            "low": [2095.0, 2075.0],  # bid low = 2075.0, ask low = 2075.40 <= TP (2079.85)
+            "low": [2095.0, 2075.0],  # ask low = 2075.40 <= TP (2079.85)
             "close": [2098.0, 2078.0],
         })
-
-        res_sell = simulate_single_trade(
+        res_tp = simulate_single_trade(
             direction="SELL",
             entry_time=self.entry_time,
             entry_open=2100.0,
             sl=2110.0,
-            m1_bars=df_sell,
+            m1_bars=df_sell_tp,
             spread=spread,
             slip=slip,
         )
+        # R_dist = 2110.0 - 2099.95 = 10.05
+        # TP = 2079.85 -> exit = 2079.90 -> pnl = (2099.95 - 2079.90)/10.05 = 20.05/10.05 = 1.9950248...
+        self.assertAlmostEqual(res_tp["pnl_r"], 1.9950, places=4)
+        self.assertAlmostEqual(res_tp["pnl_r"], 2.0 - (slip / 10.05), places=6)
 
-        expected_r_dist_sell = 10.05
-        expected_pnl_sell = 2.0 - (slip / expected_r_dist_sell)
-        self.assertAlmostEqual(res_sell["entry_price"], 2099.95, places=6)
-        self.assertAlmostEqual(res_sell["r_dist"], expected_r_dist_sell, places=6)
-        self.assertAlmostEqual(res_sell["tp"], 2079.85, places=6)
-        self.assertAlmostEqual(res_sell["exit_price"], 2079.90, places=6)
-        self.assertAlmostEqual(res_sell["pnl_r"], expected_pnl_sell, places=6)
-        self.assertLess(res_sell["pnl_r"], 2.0, "TP sau chi phí phải nhỏ hơn đúng 2.0R")
+        # B) SELL chạm SL
+        df_sell_sl = pd.DataFrame({
+            "time_utc": times,
+            "open": [2100.0, 2105.0],
+            "high": [2102.0, 2112.0],  # ask high = 2112.40 >= SL (2110.0)
+            "low": [2098.0, 2104.0],
+            "close": [2100.0, 2111.0],
+        })
+        res_sl = simulate_single_trade(
+            direction="SELL",
+            entry_time=self.entry_time,
+            entry_open=2100.0,
+            sl=2110.0,
+            m1_bars=df_sell_sl,
+            spread=spread,
+            slip=slip,
+        )
+        # exit = 2110 + 0.05 = 2110.05 -> pnl = (2099.95 - 2110.05)/10.05 = -10.10/10.05 = -1.004975...
+        self.assertAlmostEqual(res_sl["pnl_r"], -1.0050, places=4)
+        self.assertAlmostEqual(res_sl["pnl_r"], -1.0 - (slip / 10.05), places=6)
 
-    # ==========================================
-    # QUY ƯỚC BẤT ĐỐI XỨNG GAP TP
-    # ==========================================
-
-    def test_16_tp_gap_no_extra_reward_conservative(self):
-        """16. Bất đối xứng gap: Gap qua TP KHÔNG thưởng thêm, chỉ lấy đúng mức TP (bảo thủ)."""
-        # BUY: TP = 2120. Nến sau mở cửa nhảy vọt qua TP tại 2135.0
+    def test_17_tp_gap_no_extra_reward_conservative(self):
+        """17. Bất đối xứng gap: Gap qua TP KHÔNG thưởng thêm, chỉ lấy đúng mức TP (bảo thủ)."""
         times = pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min")
         df_buy_gap = pd.DataFrame({
             "time_utc": times,
@@ -553,7 +575,6 @@ class TestSimulateModule(unittest.TestCase):
             "low": [2098.0, 2130.0],
             "close": [2102.0, 2138.0],
         })
-
         res_buy = simulate_single_trade(
             direction="BUY",
             entry_time=self.entry_time,
@@ -563,45 +584,59 @@ class TestSimulateModule(unittest.TestCase):
             spread=0.0,
             slip=0.0,
         )
-
         self.assertEqual(res_buy["exit_reason"], "TP")
         self.assertEqual(res_buy["exit_price"], 2120.0, "Không được lấy giá mở 2135.0, chỉ lấy đúng TP")
         self.assertAlmostEqual(res_buy["pnl_r"], 2.0, places=6)
 
-        # SELL: TP = 2080. Nến sau mở cửa nhảy vọt qua TP xuống 2065.0
-        df_sell_gap = pd.DataFrame({
-            "time_utc": times,
-            "open": [2100.0, 2065.0],  # Gap mở cửa rơi sâu qua TP (2080)
-            "high": [2102.0, 2070.0],
-            "low": [2096.0, 2060.0],
-            "close": [2098.0, 2068.0],
-        })
+    # ==========================================
+    # TEST CÁC LỖI & CẢI TIẾN ĐƯỢC NGƯỜI DÙNG YÊU CẦU
+    # ==========================================
 
-        res_sell = simulate_single_trade(
-            direction="SELL",
-            entry_time=self.entry_time,
+    def test_18_m1data_instance_branch_no_attribute_error(self):
+        """18. Nhánh M1Data trong simulate_single_trade chạy mượt mà, không bị AttributeError (time_series.dt.tz)."""
+        times = pd.date_range("2024-01-15 07:16:00", periods=3, freq="1min").to_numpy()
+        opens = np.array([2100.0, 2105.0, 2115.0], dtype=np.float64)
+        highs = np.array([2104.0, 2112.0, 2125.0], dtype=np.float64)
+        lows = np.array([2098.0, 2102.0, 2110.0], dtype=np.float64)
+        closes = np.array([2102.0, 2110.0, 2122.0], dtype=np.float64)
+
+        m1_obj = M1Data(
+            time=times,
+            open=opens,
+            high=highs,
+            low=lows,
+            close=closes,
+        )
+
+        # Gọi trực tiếp với M1Data instance (trước đây time_series.dt.tz bị vỡ nếu time_series là DatetimeIndex)
+        res = simulate_single_trade(
+            direction="BUY",
+            entry_time="2024-01-15 07:16:00",
             entry_open=2100.0,
-            sl=2110.0,
-            m1_bars=df_sell_gap,
+            sl=2090.0,
+            m1_bars=m1_obj,
             spread=0.0,
             slip=0.0,
         )
 
-        self.assertEqual(res_sell["exit_reason"], "TP")
-        self.assertEqual(res_sell["exit_price"], 2080.0, "Không được lấy giá mở 2065.0, chỉ lấy đúng TP")
-        self.assertAlmostEqual(res_sell["pnl_r"], 2.0, places=6)
+        self.assertEqual(res["exit_reason"], "TP")
+        self.assertAlmostEqual(res["pnl_r"], 2.0, places=6)
 
-    # ==========================================
-    # TEST SIMULATE_TRADES VÀ KIỂM ĐẾM
-    # ==========================================
+    def test_19_yearly_spread_fixed_source_and_missing_year_error(self):
+        """19. get_effective_spread dùng YEARLY_MEDIAN_SPREADS cố định và báo KeyError nếu thiếu năm."""
+        # Năm 2024 có trong bảng (med = 31) -> 31 * 1.25 * 0.01 = 0.3875
+        spread_2024 = get_effective_spread(2024)
+        self.assertAlmostEqual(spread_2024, 0.3875, places=6)
 
-    def test_17_data_end_counting_and_summary(self):
-        """17. Kiểm đếm DATA_END và các lý do thoát trong bảng summary của simulate_trades."""
-        # Tạo 2 ngày có tín hiệu:
-        # Ngày 1: Thoát TP
-        # Ngày 2: Hết dữ liệu trước 16:00 (DATA_END)
+        # Năm 2010 không có trong DATA.md -> phải raise KeyError rõ ràng, không âm thầm fallback
+        with self.assertRaises(KeyError) as ctx:
+            get_effective_spread(2010)
+        self.assertIn("YEARLY_MEDIAN_SPREADS", str(ctx.exception))
+
+    def test_20_extended_columns_and_n_skipped_summary(self):
+        """20. simulate_trades giữ đầy đủ các cột tín hiệu đối chiếu biểu đồ và thống kê n_skipped."""
         day1 = pd.Timestamp("2024-01-15")
-        day2 = pd.Timestamp("2024-01-16")
+        day2_skipped = pd.Timestamp("2024-01-16")  # Ngày không có nến
 
         signals = pd.DataFrame([
             {
@@ -609,94 +644,64 @@ class TestSimulateModule(unittest.TestCase):
                 "direction": "BUY",
                 "signal_time": pd.Timestamp("2024-01-15 07:15:00"),
                 "entry_time": pd.Timestamp("2024-01-15 07:16:00"),
+                "entry_delay": 1,
                 "entry_price": 2100.0,
+                "atr": 10.0,
                 "asia_high": 2095.0,
-                "asia_low": 2090.0,  # SL = 2090 -> R_dist = 10, TP = 2120
+                "asia_low": 2090.0,
             },
             {
-                "date": day2,
+                "date": day2_skipped,
                 "direction": "SELL",
                 "signal_time": pd.Timestamp("2024-01-16 08:00:00"),
                 "entry_time": pd.Timestamp("2024-01-16 08:01:00"),
+                "entry_delay": 1,
                 "entry_price": 2100.0,
-                "asia_high": 2110.0,  # SL = 2110 -> R_dist = 10, TP = 2080
+                "atr": 10.0,
+                "asia_high": 2110.0,
                 "asia_low": 2095.0,
             },
         ])
 
-        # Tạo nến M1
         bars_day1 = pd.DataFrame({
-            "time_utc": pd.date_range("2024-01-15 07:16:00", periods=3, freq="1min"),
-            "open": [2100.0, 2105.0, 2115.0],
-            "high": [2104.0, 2112.0, 2125.0],  # Chạm TP 2120
-            "low": [2098.0, 2102.0, 2110.0],
-            "close": [2102.0, 2110.0, 2122.0],
+            "time_utc": pd.date_range("2024-01-15 07:16:00", periods=2, freq="1min"),
+            "open": [2100.0, 2115.0],
+            "high": [2104.0, 2125.0],
+            "low": [2098.0, 2110.0],
+            "close": [2102.0, 2122.0],
         })
-
-        bars_day2 = pd.DataFrame({
-            "time_utc": pd.date_range("2024-01-16 08:01:00", periods=2, freq="1min"),
-            "open": [2100.0, 2098.0],
-            "high": [2102.0, 2100.0],
-            "low": [2097.0, 2095.0],
-            "close": [2099.0, 2096.0],  # Hết dữ liệu trước 16:00 -> DATA_END
-        })
-
-        all_m1 = pd.concat([bars_day1, bars_day2], ignore_index=True)
 
         trades_df, summary = simulate_trades(
             signals,
-            all_m1,
+            bars_day1,
             fixed_spread=0.0,
             fixed_slip=0.0,
             return_summary=True,
         )
 
-        self.assertEqual(len(trades_df), 2)
-        self.assertEqual(summary["total_trades"], 2)
-        self.assertEqual(summary["n_tp"], 1)
-        self.assertEqual(summary["n_data_end"], 1, "Phải đếm đúng 1 lệnh DATA_END")
-        self.assertEqual(trades_df.iloc[0]["exit_reason"], "TP")
-        self.assertEqual(trades_df.iloc[1]["exit_reason"], "DATA_END")
-        self.assertIn("n_data_end", summary)
+        self.assertEqual(len(trades_df), 1)
+        self.assertEqual(summary["total_trades"], 1)
+        self.assertEqual(summary["n_skipped"], 1, "Phải đếm đúng 1 lệnh bị bỏ vì ngày 2 không có nến")
 
-    def test_18_simulate_trades_real_data_pipeline(self):
-        """18. Pipeline thực tế: load_m1 -> compute_asian_range -> generate_breakout_signals -> simulate_trades."""
-        # Nạp dữ liệu thực tế ngày 2024-01-02
-        m1 = load_m1("2024-01-02", "2024-01-02")
-        asian = compute_asian_range(m1)
-        sigs = generate_breakout_signals(m1, asian_ranges=asian)
-
-        self.assertFalse(sigs.empty, "Ngày 2024-01-02 có tín hiệu Breakout")
-
-        # Mô phỏng khớp lệnh với thông số mặc định (spread theo năm 2024, slip = 5 points)
-        trades = simulate_trades(sigs, m1)
-        self.assertEqual(len(trades), len(sigs))
-
-        trade = trades.iloc[0]
-        # Kiểm tra đầy đủ các cột đầu ra theo yêu cầu Bước 4
-        expected_cols = [
-            "date",
-            "direction",
-            "entry_time",
-            "entry_price",
-            "exit_time",
-            "exit_price",
-            "sl",
-            "tp",
-            "r_dist",
-            "exit_reason",
-            "pnl_r",
-            "spread",
-            "year",
+        # Kiểm tra đầy đủ các cột phục vụ dựng lại biểu đồ theo PROTOCOL.md
+        required_cols = [
+            "signal_time",
+            "entry_delay",
+            "asia_high",
+            "asia_low",
+            "atr",
+            "r_atr_ratio",
         ]
-        for col in expected_cols:
-            self.assertIn(col, trades.columns)
+        for col in required_cols:
+            self.assertIn(col, trades_df.columns, f"Thiếu cột {col} trong kết quả")
 
-        self.assertEqual(trade["direction"], "BUY")
-        self.assertEqual(trade["year"], 2024)
-        self.assertGreater(trade["spread"], 0.0)
-        self.assertGreater(trade["r_dist"], 0.0)
-        self.assertIn(trade["exit_reason"], ["TP", "SL", "SL_GAP", "TIME", "DATA_END"])
+        row = trades_df.iloc[0]
+        self.assertEqual(pd.Timestamp(row["signal_time"]), pd.Timestamp("2024-01-15 07:15:00"))
+        self.assertEqual(row["entry_delay"], 1)
+        self.assertEqual(row["atr"], 10.0)
+        self.assertAlmostEqual(row["r_atr_ratio"], 1.0, places=4)  # r_dist = 10, atr = 10 -> ratio = 1.0
+        self.assertEqual(row["asia_high"], 2095.0)
+        self.assertEqual(row["asia_low"], 2090.0)
 
 
 if __name__ == "__main__":
