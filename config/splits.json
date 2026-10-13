@@ -1,0 +1,16 @@
+{
+  "_note": "Sửa nếu cần, rồi COMMIT GIT trước khi chạy bất kỳ baseline nào. Không đổi sau khi thấy kết quả.",
+  "development": [
+    "2018-01-01",
+    "2025-06-30"
+  ],
+  "robustness": [
+    "2014-07-01",
+    "2017-12-31"
+  ],
+  "holdout": [
+    "2025-07-01",
+    "2026-10-13"
+  ],
+  "timezone": "UTC"
+}

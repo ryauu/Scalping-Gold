@@ -1,0 +1,20 @@
+# --- Dữ liệu (không commit; dựng lại bằng get_data.py + build_data.py, xem DATA.md) ---
+data/
+*.duckdb
+*.parquet
+
+# --- Python / Jupyter ---
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# --- Bí mật và cấu hình máy cá nhân ---
+.env
+*.key
+.vscode/
+
+# --- Hệ điều hành ---
+.DS_Store
+Thumbs.db
