@@ -5,6 +5,7 @@ Ngày ghi chú: 2026-10-13. Thư mục `data/` KHÔNG đưa lên git; file này 
 ## 1. Nguồn
 - Nền tảng: MetaTrader 5 (package Python `MetaTrader5`), Windows, tài khoản demo.
 - Symbol trên broker: `GOLD`. Khung: M1.
+- Thông số hợp đồng MT5 (`mt5.symbol_info("GOLD")`): `point = 0.01`, `digits = 2`. Quy đổi: `1 point = 0.01` giá (ví dụ: spread 32 points = $0.32/oz).
 - Khoảng yêu cầu: từ 2001-01 đến 2026-10-13. Thô nhận về: **4.363.757 dòng**, 2001-06-04 01:00 → 2026-10-13 09:03 (giờ server).
 - Thư mục raw (bất biến): `data/raw/mt5/GOLD_M1/decf3c12/` (tên = 8 ký tự đầu của SHA-256 file nguồn; hash đầy đủ nằm trong bảng `sources` của `data/meta.duckdb`).
 - Code tạo dữ liệu: `get_data.py` (tải) và `build_data.py` (làm sạch), chạy trong Jupyter. `SCRIPT_VERSION = "1.0"`.
