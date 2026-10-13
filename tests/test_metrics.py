@@ -26,9 +26,12 @@ from src.backtest.metrics import (
     DEFAULT_DEVELOPMENT_YEARS,
     by_year,
     evaluate_pass,
+    evaluate_pass_robustness_holdout,
     random_control,
     summarize,
 )
+from src.backtest.simulate import simulate_trades
+
 
 
 class TestMetricsModule(unittest.TestCase):
@@ -219,6 +222,194 @@ class TestMetricsModule(unittest.TestCase):
         self.assertFalse(eval_fail["c1_total_trades"]["passed"])
         self.assertFalse(eval_fail["all_passed"], "Thiếu 1 lệnh (FAIL sát nút) vẫn phải là False theo PROTOCOL")
 
+    def test_07_random_control_reproduces_actual_trade_exactly(self):
+        """7. TEST BẮT LỖI QUAN TRỌNG NHẤT:
+
+        Với mỗi lệnh thật, nhánh cùng hướng trong random_control PHẢI TÁI TẠO CHÍNH XÁC pnl_r của lệnh đó.
+        Đảm bảo việc dùng trực tiếp entry_open loại bỏ hoàn toàn sự mong manh của việc suy ngược giá.
+        """
+        # Tạo nến M1 cho 2 ngày: ngày 1 lệnh BUY, ngày 2 lệnh SELL
+        times_d1 = pd.date_range("2020-01-02 07:00", "2020-01-02 16:30", freq="1min", tz="UTC")
+        times_d2 = pd.date_range("2020-01-03 07:00", "2020-01-03 16:30", freq="1min", tz="UTC")
+
+        # Ngày 1 (BUY): Open nến vào lệnh = 1500.0, giá sau đó tăng lên 1530.0 (chạm TP)
+        n1 = len(times_d1)
+        opens1 = np.full(n1, 1500.0)
+        highs1 = np.full(n1, 1502.0)
+        lows1 = np.full(n1, 1498.0)
+        closes1 = np.full(n1, 1500.0)
+        # Tại nến thứ 30, giá tăng vọt chạm TP
+        highs1[30:] = 1535.0
+
+        # Ngày 2 (SELL): Open nến vào lệnh = 1520.0, giá sau đó giảm xuống 1480.0 (chạm TP)
+        n2 = len(times_d2)
+        opens2 = np.full(n2, 1520.0)
+        highs2 = np.full(n2, 1522.0)
+        lows2 = np.full(n2, 1518.0)
+        closes2 = np.full(n2, 1520.0)
+        # Tại nến thứ 25, giá giảm sâu chạm TP của SELL
+        lows2[25:] = 1480.0
+
+        df_m1_1 = pd.DataFrame({
+            "time_utc": times_d1,
+            "open": opens1,
+            "high": highs1,
+            "low": lows1,
+            "close": closes1,
+            "spread": 40.0,
+        })
+        df_m1_2 = pd.DataFrame({
+            "time_utc": times_d2,
+            "open": opens2,
+            "high": highs2,
+            "low": lows2,
+            "close": closes2,
+            "spread": 40.0,
+        })
+        df_m1 = pd.concat([df_m1_1, df_m1_2], ignore_index=True)
+
+        # Tạo tín hiệu cho 2 ngày
+        signals = pd.DataFrame([
+            {
+                "date": pd.Timestamp("2020-01-02", tz="UTC"),
+                "direction": "BUY",
+                "signal_time": pd.Timestamp("2020-01-02 07:05", tz="UTC"),
+                "entry_time": pd.Timestamp("2020-01-02 07:06", tz="UTC"),
+                "entry_open": 1500.0,
+                "entry_price": 1500.0,
+                "sl": 1490.0,
+                "atr": 5.0,
+                "asia_high": 1505.0,
+                "asia_low": 1490.0,
+            },
+            {
+                "date": pd.Timestamp("2020-01-03", tz="UTC"),
+                "direction": "SELL",
+                "signal_time": pd.Timestamp("2020-01-03 07:10", tz="UTC"),
+                "entry_time": pd.Timestamp("2020-01-03 07:11", tz="UTC"),
+                "entry_open": 1520.0,
+                "entry_price": 1520.0,
+                "sl": 1530.0,
+                "atr": 5.0,
+                "asia_high": 1530.0,
+                "asia_low": 1515.0,
+            },
+        ])
+
+        # Chạy mô phỏng lệnh thật
+        trades = simulate_trades(signals, df_m1)
+        self.assertEqual(len(trades), 2)
+        self.assertIn("entry_open", trades.columns)
+
+        # Chạy kiểm soát ngẫu nhiên trên dữ liệu M1
+        rc = random_control(trades, m1=df_m1, n_simulations=10, seed=42)
+        pnl_buys = rc["pnl_buys"]
+        pnl_sells = rc["pnl_sells"]
+
+        # Kiểm tra tính khớp 100% giữa nhánh cùng hướng và pnl_r của lệnh thật
+        for i, row in trades.iterrows():
+            dir_i = str(row["direction"]).upper()
+            actual_pnl = float(row["pnl_r"])
+            if dir_i == "BUY":
+                buy_branch_pnl = float(pnl_buys[i])
+                self.assertAlmostEqual(
+                    buy_branch_pnl,
+                    actual_pnl,
+                    places=9,
+                    msg=f"Lệnh BUY #{i}: nhánh BUY của random_control ({buy_branch_pnl}) lệch với lệnh thật ({actual_pnl})",
+                )
+            else:
+                sell_branch_pnl = float(pnl_sells[i])
+                self.assertAlmostEqual(
+                    sell_branch_pnl,
+                    actual_pnl,
+                    places=9,
+                    msg=f"Lệnh SELL #{i}: nhánh SELL của random_control ({sell_branch_pnl}) lệch với lệnh thật ({actual_pnl})",
+                )
+
+    def test_08_summarize_nan_guard(self):
+        """8. summarize chốt chặn NaN: Nếu pnl_r có NaN, phải ném ValueError."""
+        # A) DataFrame có NaN
+        trades_nan = pd.DataFrame({"pnl_r": [1.0, np.nan, -0.5]})
+        with self.assertRaises(ValueError) as ctx:
+            summarize(trades_nan)
+        self.assertIn("NaN trong pnl_r", str(ctx.exception))
+
+        # B) Array/list có NaN
+        with self.assertRaises(ValueError):
+            summarize([np.nan, 2.0, -1.0])
+
+    def test_09_random_control_missing_m1_raises_error(self):
+        """9. random_control: Báo lỗi khi thiếu nến M1 thay vì âm thầm ghi 0.0."""
+        trades = pd.DataFrame([
+            {
+                "date": pd.Timestamp("2020-01-02", tz="UTC"),
+                "direction": "BUY",
+                "entry_time": pd.Timestamp("2020-01-02 07:06", tz="UTC"),
+                "entry_open": 1500.0,
+                "entry_price": 1500.45,
+                "sl": 1490.0,
+                "pnl_r": 1.0,
+            }
+        ])
+
+        # Tạo M1 rỗng hoặc chỉ có ngày khác (2020-01-05)
+        times_other = pd.date_range("2020-01-05 07:00", "2020-01-05 16:30", freq="1min", tz="UTC")
+        m1_other = pd.DataFrame({
+            "time_utc": times_other,
+            "open": 1500.0,
+            "high": 1501.0,
+            "low": 1499.0,
+            "close": 1500.0,
+        })
+
+        with self.assertRaises(ValueError) as ctx:
+            random_control(trades, m1=m1_other, n_simulations=10, seed=42)
+        self.assertIn("Không tìm thấy nến M1", str(ctx.exception))
+
+    def test_10_random_control_always_buy_and_sell_reference(self):
+        """10. random_control trả về 2 số tham chiếu EXPLORATORY: always_buy_expectancy và always_sell_expectancy."""
+        pnl_buys = np.array([2.0, 1.0, -1.0])
+        pnl_sells = np.array([-1.0, -1.0, 2.0])
+        trades = pd.DataFrame({"pnl_r": pnl_buys})
+
+        res = random_control(
+            trades,
+            precomputed_pairs=(pnl_buys, pnl_sells),
+            n_simulations=10,
+            seed=42,
+        )
+
+        expected_buy_exp = float(np.mean(pnl_buys))  # (2 + 1 - 1) / 3 = 2/3 ≈ 0.666667
+        expected_sell_exp = float(np.mean(pnl_sells))  # (-1 - 1 + 2) / 3 = 0.0
+
+        self.assertIn("always_buy_expectancy", res)
+        self.assertIn("always_sell_expectancy", res)
+        self.assertAlmostEqual(res["always_buy_expectancy"], expected_buy_exp, places=6)
+        self.assertAlmostEqual(res["always_sell_expectancy"], expected_sell_exp, places=6)
+
+    def test_11_evaluate_pass_robustness_holdout(self):
+        """11. evaluate_pass_robustness_holdout: chỉ kiểm tra điều kiện 2 (kỳ vọng >= 0.05R) và 3 (PF >= 1.10)."""
+        # Ca đạt cả 2
+        trades_pass = pd.DataFrame({"pnl_r": [2.0, 2.0, -1.0, -1.0]})  # exp = 0.5, PF = 2.0
+        res_pass = evaluate_pass_robustness_holdout(trades_pass)
+        self.assertTrue(res_pass["all_passed"])
+        self.assertTrue(res_pass["c2_expectancy"]["passed"])
+        self.assertTrue(res_pass["c3_profit_factor"]["passed"])
+
+        # Ca fail điều kiện 2 (exp = 0.04 < 0.05) dù PF cao
+        trades_fail_c2 = pd.DataFrame({"pnl_r": [0.04, 0.04]})
+        res_fail_c2 = evaluate_pass_robustness_holdout(trades_fail_c2)
+        self.assertFalse(res_fail_c2["all_passed"])
+        self.assertFalse(res_fail_c2["c2_expectancy"]["passed"])
+
+        # Ca fail điều kiện 3 (PF = 1.05 < 1.10)
+        trades_fail_c3 = pd.DataFrame({"pnl_r": [1.05, -1.0]})
+        res_fail_c3 = evaluate_pass_robustness_holdout(trades_fail_c3)
+        self.assertFalse(res_fail_c3["all_passed"])
+        self.assertFalse(res_fail_c3["c3_profit_factor"]["passed"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

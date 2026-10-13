@@ -76,6 +76,10 @@ def summarize(trades: pd.DataFrame | Sequence[float]) -> dict[str, Any]:
         pnl = np.asarray(trades, dtype=np.float64)
 
     total_trades = len(pnl)
+    if np.isnan(pnl).any():
+        n_nans = int(np.isnan(pnl).sum())
+        raise ValueError(f"Phát hiện {n_nans} giá trị NaN trong pnl_r. Chặn lại để tránh làm sai lệch các so sánh ngưỡng.")
+
     if total_trades == 0:
         return {
             "total_trades": 0,
@@ -251,11 +255,15 @@ def random_control(
             "n_exceed": 0,
             "n_simulations": n_simulations,
             "seed": seed,
+            "always_buy_expectancy": 0.0,
+            "always_sell_expectancy": 0.0,
             "sim_mean": 0.0,
             "sim_std": 0.0,
             "sim_p50": 0.0,
             "sim_p95": 0.0,
             "sim_expectancies": np.zeros(n_simulations, dtype=np.float64),
+            "pnl_buys": np.array([], dtype=np.float64),
+            "pnl_sells": np.array([], dtype=np.float64),
         }
 
     actual_pnl = trades["pnl_r"].to_numpy(dtype=np.float64)
@@ -287,7 +295,7 @@ def random_control(
             entry_time = pd.Timestamp(row["entry_time"])
             year = int(row["year"]) if "year" in row else trade_date.year
 
-            # Lấy entry_open (nếu có cột entry_open dùng trực tiếp, nếu không suy ngược từ entry_price)
+            # Lấy entry_open: ưu tiên dùng trực tiếp từ cột entry_open
             if "entry_open" in row and pd.notna(row["entry_open"]):
                 open_val = float(row["entry_open"])
             elif str(row["direction"]).upper() == "BUY":
@@ -303,10 +311,10 @@ def random_control(
 
             day_bars = grouped_m1.get(trade_date)
             if day_bars is None or day_bars.empty:
-                logger.warning("Không có nến cho ngày %s trong kiểm soát ngẫu nhiên.", trade_date.date())
-                pnl_buys.append(0.0)
-                pnl_sells.append(0.0)
-                continue
+                raise ValueError(
+                    f"Không tìm thấy nến M1 cho ngày {trade_date.strftime('%Y-%m-%d')} trong random_control. "
+                    f"Vì lệnh thật đã được mô phỏng từ đúng ngày đó, thiếu nến là lỗi bất thường."
+                )
 
             # Nhánh BUY ngẫu nhiên: SL = open_val - d
             sl_buy = open_val - d
@@ -344,6 +352,9 @@ def random_control(
         pnl_sells_arr = np.array(pnl_sells, dtype=np.float64)
 
     n_trades = len(pnl_buys_arr)
+    always_buy_exp = float(np.mean(pnl_buys_arr)) if n_trades > 0 else 0.0
+    always_sell_exp = float(np.mean(pnl_sells_arr)) if n_trades > 0 else 0.0
+
     if n_trades == 0:
         return {
             "p_value": 1.0,
@@ -351,11 +362,15 @@ def random_control(
             "n_exceed": 0,
             "n_simulations": n_simulations,
             "seed": seed,
+            "always_buy_expectancy": 0.0,
+            "always_sell_expectancy": 0.0,
             "sim_mean": 0.0,
             "sim_std": 0.0,
             "sim_p50": 0.0,
             "sim_p95": 0.0,
             "sim_expectancies": np.zeros(n_simulations, dtype=np.float64),
+            "pnl_buys": np.array([], dtype=np.float64),
+            "pnl_sells": np.array([], dtype=np.float64),
         }
 
     # Vectorized Monte Carlo permutation
@@ -375,11 +390,15 @@ def random_control(
         "n_exceed": n_exceed,
         "n_simulations": n_simulations,
         "seed": seed,
+        "always_buy_expectancy": always_buy_exp,
+        "always_sell_expectancy": always_sell_exp,
         "sim_mean": float(np.mean(sim_expectancies)),
         "sim_std": float(np.std(sim_expectancies)),
         "sim_p50": float(np.median(sim_expectancies)),
         "sim_p95": float(np.percentile(sim_expectancies, 95)),
         "sim_expectancies": sim_expectancies,
+        "pnl_buys": pnl_buys_arr,
+        "pnl_sells": pnl_sells_arr,
     }
 
 
@@ -471,6 +490,53 @@ def evaluate_pass(
             "threshold": 0.05,
             "passed": c5_passed,
             "details": rc_res,
+        },
+        "summary": summary_stats,
+    }
+
+
+def evaluate_pass_robustness_holdout(trades: pd.DataFrame) -> dict[str, Any]:
+    """Đánh giá tiêu chí PASS cho lớp Robustness và Holdout theo PROTOCOL.md mục 5.
+
+    Theo PROTOCOL.md:
+    "Lớp Robustness và Holdout (mỗi lớp chạy một lần): cần đạt điều kiện 2 và 3.
+    FAIL sát nút vẫn là FAIL, không tự nới ngưỡng sau khi thấy kết quả."
+
+    2 điều kiện bắt buộc:
+    - Điều kiện 2: Kỳ vọng ròng >= +0,05R mỗi lệnh (sau chi phí).
+    - Điều kiện 3: Profit factor >= 1,10.
+
+    Tham số:
+        trades: DataFrame chứa các lệnh giao dịch đã mô phỏng.
+
+    Trả về:
+        dict chi tiết chứa:
+        - all_passed: bool (True khi đạt cả điều kiện 2 và 3)
+        - c2_expectancy: dict
+        - c3_profit_factor: dict
+        - summary: dict
+    """
+    summary_stats = summarize(trades)
+    expectancy = summary_stats["expectancy"]
+    profit_factor = summary_stats["profit_factor"]
+
+    c2_passed = bool(expectancy >= 0.05)
+    c3_passed = bool(profit_factor >= 1.10)
+    all_passed = bool(c2_passed and c3_passed)
+
+    return {
+        "all_passed": all_passed,
+        "c2_expectancy": {
+            "description": "Kỳ vọng ròng >= +0.05R mỗi lệnh (sau chi phí)",
+            "actual": expectancy,
+            "threshold": 0.05,
+            "passed": c2_passed,
+        },
+        "c3_profit_factor": {
+            "description": "Profit factor >= 1.10",
+            "actual": profit_factor,
+            "threshold": 1.10,
+            "passed": c3_passed,
         },
         "summary": summary_stats,
     }

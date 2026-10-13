@@ -432,7 +432,12 @@ def simulate_trades(
         trade_date = pd.Timestamp(row["date"]).floor("D")
         direction = str(row["direction"]).strip().upper()
         entry_time = pd.Timestamp(row["entry_time"])
-        entry_open = float(row["entry_price"])
+        if "entry_open" in row and pd.notna(row["entry_open"]):
+            entry_open = float(row["entry_open"])
+        elif "entry_price" in row and pd.notna(row["entry_price"]):
+            entry_open = float(row["entry_price"])
+        else:
+            raise KeyError("Bảng tín hiệu signals cần có cột 'entry_open' hoặc 'entry_price'")
 
         # SL lấy từ asia_low (BUY) hoặc asia_high (SELL) nếu không có cột sl riêng
         if "sl" in row and pd.notna(row["sl"]):
