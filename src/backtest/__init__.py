@@ -13,7 +13,11 @@ from .data import (
     validate_date_range,
 )
 
-from .signals import DEFAULT_MIN_ASIAN_BARS, compute_asian_range
+from .signals import (
+    DEFAULT_MIN_ASIAN_BARS,
+    compute_asian_range,
+    generate_breakout_signals,
+)
 
 __all__ = [
     "M1Data",
@@ -27,7 +31,9 @@ __all__ = [
     "get_development_start_date",
     "get_candle_counts_by_year",
     "compute_asian_range",
+    "generate_breakout_signals",
     "DEFAULT_MIN_ASIAN_BARS",
 ]
+
 
 
