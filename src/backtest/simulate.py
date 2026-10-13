@@ -15,14 +15,13 @@ Quy ước mô phỏng C3 (đã đăng ký tại PROTOCOL.md mục 9):
 - Chạm cả hai trong một nến: tính SL.
 - Thoát cứng: nến đầu tiên có giờ >= 16:00 UTC, tại Open (BUY: - slip; SELL: + spread + slip), lý do TIME.
 - Hết dữ liệu trước 16:00: thoát tại Close nến cuối (BUY: - slip; SELL: + spread + slip), ghi DATA_END và đếm.
-- entry_delay được ghi lại, không dùng để lọc.
+- entry_delay được ghi lại, không dùng để lọc (nếu thiếu tính từ entry_time - signal_time, nếu không có để NaN).
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -53,15 +52,6 @@ YEARLY_MEDIAN_SPREADS: dict[int, float] = {
     2025: 34.0,
     2026: 51.0,
 }
-
-
-def compute_yearly_spread_medians(db_path: Path | str | None = None) -> dict[int, float]:
-    """Trả về bảng trung vị spread theo năm cố định từ YEARLY_MEDIAN_SPREADS (khớp DATA.md).
-
-    Lưu ý: Không truy vấn runtime trực tiếp vào DuckDB để tránh vi phạm chốt chặn
-    và rò rỉ dữ liệu Holdout của năm 2025/2026.
-    """
-    return dict(YEARLY_MEDIAN_SPREADS)
 
 
 def get_effective_spread(
@@ -104,7 +94,7 @@ def simulate_single_trade(
     trade_date: pd.Timestamp | str | None = None,
     year: int | None = None,
     signal_time: pd.Timestamp | str | None = None,
-    entry_delay: int | None = None,
+    entry_delay: float | None = None,
     atr: float | None = None,
     asia_high: float | None = None,
     asia_low: float | None = None,
@@ -126,7 +116,7 @@ def simulate_single_trade(
         trade_date: Ngày giao dịch (Timestamp hoặc chuỗi).
         year: Năm giao dịch (int).
         signal_time: Thời điểm sinh tín hiệu (tùy chọn để đối chiếu trực quan).
-        entry_delay: Độ trễ vào lệnh tính bằng phút (tùy chọn).
+        entry_delay: Độ trễ vào lệnh tính bằng phút (tùy chọn; nếu thiếu tự tính từ entry_time - signal_time).
         atr: Giá trị ATR tại nến tín hiệu (tùy chọn).
         asia_high: Đỉnh vùng Á (tùy chọn).
         asia_low: Đáy vùng Á (tùy chọn).
@@ -226,25 +216,13 @@ def simulate_single_trade(
         # a) Nến đầu tiên có giờ >= 16:00: thoát ở giá mở
         if cur_h >= 16:
             if dir_clean == "BUY":
-                if o <= sl:
-                    # Mở nến đã vượt SL (gap)
-                    exit_price = float(o - slip)
-                    exit_reason = "SL_GAP"
-                else:
-                    exit_price = float(o - slip)
-                    exit_reason = "TIME"
-                exit_time = cur_t
-                break
+                exit_price = float(o - slip)
+                exit_reason = "SL_GAP" if o <= sl else "TIME"
             else:  # SELL
-                if o + spread >= sl:
-                    # Mở nến theo Ask đã vượt SL (gap)
-                    exit_price = float(o + spread + slip)
-                    exit_reason = "SL_GAP"
-                else:
-                    exit_price = float(o + spread + slip)
-                    exit_reason = "TIME"
-                exit_time = cur_t
-                break
+                exit_price = float(o + spread + slip)
+                exit_reason = "SL_GAP" if (o + spread >= sl) else "TIME"
+            exit_time = cur_t
+            break
 
         # b) Với nến trước 16:00, nếu i > 0 (nến sau nến vào lệnh):
         # Kiểm tra xem giá mở nến có gap qua SL không
@@ -318,8 +296,14 @@ def simulate_single_trade(
         pnl_r = float((entry_price - exit_price) / r_dist)
 
     # Chuẩn bị các cột hỗ trợ đối chiếu hình ảnh / kiểm tra trực quan
-    sig_time_val = pd.to_datetime(signal_time) if signal_time is not None else None
-    delay_val = int(entry_delay) if (entry_delay is not None and pd.notna(entry_delay)) else 0
+    sig_time_val = pd.to_datetime(signal_time) if signal_time is not None and pd.notna(signal_time) else None
+    if entry_delay is not None and pd.notna(entry_delay):
+        delay_val = float(entry_delay)
+    elif sig_time_val is not None:
+        delay_val = float((entry_time_ts - sig_time_val).total_seconds() / 60.0)
+    else:
+        delay_val = np.nan
+
     atr_val = float(atr) if (atr is not None and pd.notna(atr)) else np.nan
     r_atr_ratio = float(r_dist / atr_val) if (not np.isnan(atr_val) and atr_val > 0) else np.nan
     asia_high_val = float(asia_high) if (asia_high is not None and pd.notna(asia_high)) else np.nan
@@ -351,7 +335,6 @@ def simulate_single_trade(
 def simulate_trades(
     signals: pd.DataFrame,
     m1: pd.DataFrame | M1Data,
-    db_path: Path | str | None = None,
     point: float = DEFAULT_POINT,
     spread_multiplier: float = DEFAULT_SPREAD_MULTIPLIER,
     slip_points: float = DEFAULT_SLIP_POINTS,
@@ -368,7 +351,6 @@ def simulate_trades(
     Tham số:
         signals: DataFrame chứa các tín hiệu phá vỡ sinh từ generate_breakout_signals.
         m1: Dữ liệu nến M1 (DataFrame hoặc M1Data).
-        db_path: Không còn sử dụng (giữ lại tham số để tương thích ngược).
         point: Kích thước point của GOLD (mặc định 0.01).
         spread_multiplier: Hệ số nhân spread theo năm (mặc định 1.25).
         slip_points: Trượt giá mỗi lần khớp tính theo points (mặc định 5.0 points = 0.05).
@@ -479,6 +461,16 @@ def simulate_trades(
             n_skipped += 1
             continue
 
+        # Tính toán entry_delay nếu chưa có hoặc NaN
+        sig_time_raw = row.get("signal_time")
+        entry_delay_raw = row.get("entry_delay")
+        if entry_delay_raw is not None and pd.notna(entry_delay_raw):
+            delay_to_pass: float | None = float(entry_delay_raw)
+        elif sig_time_raw is not None and pd.notna(sig_time_raw):
+            delay_to_pass = float((entry_time - pd.to_datetime(sig_time_raw)).total_seconds() / 60.0)
+        else:
+            delay_to_pass = None
+
         trade_res = simulate_single_trade(
             direction=direction,
             entry_time=entry_time,
@@ -491,8 +483,8 @@ def simulate_trades(
             tp=tp,
             trade_date=trade_date,
             year=year,
-            signal_time=row.get("signal_time"),
-            entry_delay=row.get("entry_delay"),
+            signal_time=sig_time_raw,
+            entry_delay=delay_to_pass,
             atr=row.get("atr"),
             asia_high=row.get("asia_high"),
             asia_low=row.get("asia_low"),
