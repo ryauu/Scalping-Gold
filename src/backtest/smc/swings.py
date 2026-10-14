@@ -80,11 +80,9 @@ def detect_swings(
     sorted_df["time_utc"] = time_series
     sorted_df = sorted_df.sort_values("time_utc", kind="stable").reset_index(drop=True)
 
-    # 4. Kiểm tra thời gian tăng nghiêm ngặt (không trùng lặp)
+    # 4. Kiểm tra thời gian không trùng lặp (kết hợp với sort_values đảm bảo tăng dần nghiêm ngặt)
     if sorted_df["time_utc"].duplicated().any():
         raise ValueError("Dữ liệu 'time_utc' chứa các mốc thời gian bị trùng lặp.")
-    if not sorted_df["time_utc"].is_monotonic_increasing:
-        raise ValueError("Dữ liệu 'time_utc' phải được sắp xếp tăng dần nghiêm ngặt.")
 
     times = sorted_df["time_utc"].tolist()
     highs = sorted_df["high"].to_numpy(dtype=np.float64)
