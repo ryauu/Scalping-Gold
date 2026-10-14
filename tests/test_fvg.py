@@ -642,7 +642,6 @@ class TestFVGModule(unittest.TestCase):
                 # Đối chiếu nội dung bảng Lifecycle
                 lc_cols = ["event_type", "time_candle", "time_available", "price_trigger"]
                 for col in lc_cols:
-                    v_p = fvg_pre.index.to_numpy()
                     v1 = lc_pre[col].fillna(-999).to_numpy()
                     v2 = lc_full_filt[col].fillna(-999).to_numpy()
                     self.assertTrue((v1 == v2).all(), f"Sai khác cột lifecycle '{col}' tại điểm cắt {cut_point}")
@@ -786,6 +785,220 @@ class TestFVGModule(unittest.TestCase):
         print(gap_counts)
         print("\n=== FVG LIFECYCLE EVENTS DISTRIBUTION ===")
         print(lc_dist)
+
+    def test_19_exact_equality_and_uninitialized_atr_boundary(self):
+        """19. Ca biên nghiêm ngặt:
+
+        - Low[i] == High[i-2] (hoặc High[i] == Low[i-2]): Không được sinh FVG.
+        - Nến chưa có giá trị ATR (14 nến đầu): Không sinh FVG dù gap lớn.
+        - atr_ref <= 0 (dữ liệu phẳng dị thường): Không sinh FVG.
+        """
+        base_df = _make_steady_candles(14, high=108.0, low=100.0, close=104.0)
+
+        # 1. Ca bằng nhau nghiêm ngặt phía Bullish: Low[14] == High[12] = 108.0
+        bar_eq_bull = pd.DataFrame([{
+            "time_utc": pd.Timestamp("2024-01-02 14:00"),
+            "open": 110.0,
+            "high": 115.0,
+            "low": 108.0,  # Low[14] == High[12] == 108.0
+            "close": 112.0,
+        }])
+        df_eq_bull = pd.concat([base_df, bar_eq_bull], ignore_index=True)
+        assert_candles_valid(self, df_eq_bull)
+        fvg_eq_b, _ = detect_fvg(df_eq_bull, gamma=0.15, atr_period=14)
+        self.assertTrue(fvg_eq_b.empty, "Low[i] == High[i-2] tuyệt đối KHÔNG phải là Bullish FVG")
+
+        # 2. Ca bằng nhau nghiêm ngặt phía Bearish: High[14] == Low[12] = 100.0
+        bar_eq_bear = pd.DataFrame([{
+            "time_utc": pd.Timestamp("2024-01-02 14:00"),
+            "open": 98.0,
+            "high": 100.0,  # High[14] == Low[12] == 100.0
+            "low": 95.0,
+            "close": 96.0,
+        }])
+        df_eq_bear = pd.concat([base_df, bar_eq_bear], ignore_index=True)
+        assert_candles_valid(self, df_eq_bear)
+        fvg_eq_bear, _ = detect_fvg(df_eq_bear, gamma=0.15, atr_period=14)
+        self.assertTrue(fvg_eq_bear.empty, "High[i] == Low[i-2] tuyệt đối KHÔNG phải là Bearish FVG")
+
+        # 3. Nến chưa đủ 14 nến khởi động ATR (i <= 13 -> atr_ref = NaN)
+        # Tạo chuỗi ngắn 10 nến có gap khổng lồ tại nến 5
+        short_times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h")
+        short_df = pd.DataFrame({
+            "time_utc": short_times,
+            "open": [100.0] * 10,
+            "high": [105.0] * 10,
+            "low": [95.0] * 10,
+            "close": [100.0] * 10,
+        })
+        # Nến 5 tạo gap khổng lồ so với nến 3
+        short_df.loc[5, ["open", "high", "low", "close"]] = [200.0, 220.0, 190.0, 210.0]
+        assert_candles_valid(self, short_df)
+        fvg_uninit, _ = detect_fvg(short_df, gamma=0.15, atr_period=14)
+        self.assertTrue(fvg_uninit.empty, "Nến chưa có giá trị ATR hợp lệ không được sinh FVG")
+
+        # 4. atr_ref <= 0 (dữ liệu phẳng hoàn toàn, TR = 0)
+        flat_times = pd.date_range("2024-01-02 00:00", periods=15, freq="1h")
+        flat_df = pd.DataFrame({
+            "time_utc": flat_times,
+            "open": [100.0] * 15,
+            "high": [100.0] * 15,
+            "low": [100.0] * 15,
+            "close": [100.0] * 15,
+        })
+        # Nến 14 nhảy vọt tạo gap, nhưng atr_ref = atr[13] = 0.0 <= 0
+        flat_df.loc[14, ["open", "high", "low", "close"]] = [110.0, 120.0, 105.0, 115.0]
+        assert_candles_valid(self, flat_df)
+        fvg_flat, _ = detect_fvg(flat_df, gamma=0.15, atr_period=14)
+        self.assertTrue(fvg_flat.empty, "atr_ref <= 0 không được sinh FVG")
+
+    def test_20_brute_force_exhaustive_randomized_synthetic_comparison(self):
+        """20. ĐỐI CHIẾU VÉT CẠN (BRUTE-FORCE EXHAUSTIVE COMPARISON) TRÊN DỮ LIỆU GIẢ NGẪU NHIÊN:
+
+        Sinh 120 nến ngẫu nhiên có seed cố định, chạy đối chiếu 100% từng dòng FVG và
+        chuỗi sự kiện vòng đời với hàm tham chiếu ngây thơ độc lập (naive ground-truth).
+        """
+        def _naive_reference_fvg(df, gamma=0.15, m=10, atr_period=14):
+            n = len(df)
+            highs = df["high"].to_numpy(dtype=float)
+            lows = df["low"].to_numpy(dtype=float)
+            closes = df["close"].to_numpy(dtype=float)
+            times = df["time_utc"].to_numpy()
+            dur = pd.Timedelta("1h")
+            dur_ns = np.timedelta64(1, "h")
+
+            # Tính ATR thuần túy từng bước
+            tr = np.zeros(n, dtype=float)
+            tr[0] = highs[0] - lows[0]
+            for k in range(1, n):
+                tr[k] = max(highs[k] - lows[k], abs(highs[k] - closes[k - 1]), abs(lows[k] - closes[k - 1]))
+            atr = np.full(n, np.nan, dtype=float)
+            if n >= atr_period:
+                atr[atr_period - 1] = np.mean(tr[:atr_period])
+                for k in range(atr_period, n):
+                    atr[k] = (atr[k - 1] * (atr_period - 1) + tr[k]) / atr_period
+
+            fvgs = []
+            for i in range(2, n):
+                atr_ref = atr[i - 1]
+                if np.isnan(atr_ref) or atr_ref <= 0:
+                    continue
+                min_gap = gamma * atr_ref
+                dt1 = times[i - 1] - times[i - 2]
+                dt2 = times[i] - times[i - 1]
+                spans_gap = bool((dt1 > dur_ns) or (dt2 > dur_ns))
+
+                if lows[i] > highs[i - 2]:
+                    gap = lows[i] - highs[i - 2]
+                    if gap >= min_gap:
+                        fvgs.append({
+                            "fvg_id": len(fvgs), "direction": "BULLISH", "bar_index": i,
+                            "time_candle": pd.Timestamp(times[i]), "time_available": pd.Timestamp(times[i]) + dur,
+                            "top": float(lows[i]), "bottom": float(highs[i - 2]),
+                            "near_edge": float(lows[i]), "far_edge": float(highs[i - 2]),
+                            "gap_size": float(gap), "atr_ref": float(atr_ref), "spans_gap": spans_gap,
+                        })
+                elif highs[i] < lows[i - 2]:
+                    gap = lows[i - 2] - highs[i]
+                    if gap >= min_gap:
+                        fvgs.append({
+                            "fvg_id": len(fvgs), "direction": "BEARISH", "bar_index": i,
+                            "time_candle": pd.Timestamp(times[i]), "time_available": pd.Timestamp(times[i]) + dur,
+                            "top": float(lows[i - 2]), "bottom": float(highs[i]),
+                            "near_edge": float(highs[i]), "far_edge": float(lows[i - 2]),
+                            "gap_size": float(gap), "atr_ref": float(atr_ref), "spans_gap": spans_gap,
+                        })
+
+            lc = []
+            for f in fvgs:
+                fid = f["fvg_id"]
+                direction = f["direction"]
+                i = f["bar_index"]
+                top = f["top"]
+                bottom = f["bottom"]
+                near = f["near_edge"]
+                lc.append({
+                    "fvg_id": fid, "event_type": "CREATED", "bar_index": i,
+                    "time_candle": f["time_candle"], "time_available": f["time_available"],
+                    "price_trigger": near,
+                })
+                tested = False
+                just_tested_at_m = False
+                for j in range(i + 1, n):
+                    tj = pd.Timestamp(times[j])
+                    t_av_j = tj + dur
+                    cj, hj, lj = closes[j], highs[j], lows[j]
+                    if just_tested_at_m:
+                        inv = (cj < bottom) if direction == "BULLISH" else (cj > top)
+                        if inv:
+                            lc.append({"fvg_id": fid, "event_type": "INVALIDATED", "bar_index": j,
+                                       "time_candle": tj, "time_available": t_av_j, "price_trigger": cj})
+                        else:
+                            lc.append({"fvg_id": fid, "event_type": "EXPIRED", "bar_index": j,
+                                       "time_candle": tj, "time_available": t_av_j, "price_trigger": np.nan})
+                        break
+                    inv = (cj < bottom) if direction == "BULLISH" else (cj > top)
+                    if inv:
+                        lc.append({"fvg_id": fid, "event_type": "INVALIDATED", "bar_index": j,
+                                   "time_candle": tj, "time_available": t_av_j, "price_trigger": cj})
+                        break
+                    if not tested:
+                        touches = (lj <= top) if direction == "BULLISH" else (hj >= bottom)
+                        if touches:
+                            lc.append({"fvg_id": fid, "event_type": "TESTED", "bar_index": j,
+                                       "time_candle": tj, "time_available": t_av_j, "price_trigger": near})
+                            tested = True
+                            if (j - i) == m:
+                                just_tested_at_m = True
+                                continue
+                    if (j - i) >= m:
+                        lc.append({"fvg_id": fid, "event_type": "EXPIRED", "bar_index": j,
+                                   "time_candle": tj, "time_available": t_av_j, "price_trigger": np.nan})
+                        break
+
+            ref_fvg_df = pd.DataFrame(fvgs)
+            ref_lc_df = pd.DataFrame(lc)
+            if not ref_lc_df.empty:
+                ord_map = {"CREATED": 0, "TESTED": 1, "INVALIDATED": 2, "EXPIRED": 3}
+                ref_lc_df["_ord"] = ref_lc_df["event_type"].map(ord_map)
+                ref_lc_df = ref_lc_df.sort_values(by=["time_available", "fvg_id", "_ord"], kind="stable").reset_index(drop=True)
+                ref_lc_df["lifecycle_id"] = np.arange(len(ref_lc_df), dtype=int)
+                del ref_lc_df["_ord"]
+            return ref_fvg_df, ref_lc_df
+
+        rng = np.random.default_rng(2024)
+        n_bars = 120
+        p = 100.0
+        records = []
+        t = pd.Timestamp("2024-01-01 00:00")
+        for _ in range(n_bars):
+            jump = rng.normal(0, 2.5)
+            o = p
+            c = p + jump
+            h = max(o, c) + abs(rng.normal(0, 1.2))
+            l = min(o, c) - abs(rng.normal(0, 1.2))
+            records.append({"time_utc": t, "open": o, "high": h, "low": l, "close": c})
+            p = c
+            t += pd.Timedelta("1h")
+        syn_df = pd.DataFrame(records)
+        assert_candles_valid(self, syn_df)
+
+        act_fvg, act_lc = detect_fvg(syn_df, gamma=0.15, m=10, atr_period=14)
+        ref_fvg, ref_lc = _naive_reference_fvg(syn_df, gamma=0.15, m=10, atr_period=14)
+
+        self.assertEqual(len(act_fvg), len(ref_fvg))
+        self.assertEqual(len(act_lc), len(ref_lc))
+
+        # Đối chiếu 100% cột bảng FVG
+        for col in ["direction", "bar_index", "time_candle", "time_available", "spans_gap"]:
+            self.assertTrue((act_fvg[col].values == ref_fvg[col].values).all(), f"Khác biệt cột FVG '{col}'")
+        for col in ["top", "bottom", "near_edge", "far_edge", "gap_size", "atr_ref"]:
+            self.assertTrue(np.allclose(act_fvg[col].values, ref_fvg[col].values), f"Khác biệt cột số thực FVG '{col}'")
+
+        # Đối chiếu 100% cột bảng Lifecycle
+        for col in ["event_type", "bar_index", "time_candle", "time_available"]:
+            self.assertTrue((act_lc[col].values == ref_lc[col].values).all(), f"Khác biệt cột LC '{col}'")
+        self.assertTrue(np.allclose(act_lc["price_trigger"].fillna(-999), ref_lc["price_trigger"].fillna(-999)))
 
 
 if __name__ == "__main__":
