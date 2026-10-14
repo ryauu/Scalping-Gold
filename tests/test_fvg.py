@@ -1,4 +1,4 @@
-"""Kiểm thử toàn diện mô-đun fvg.py (Fair Value Gap & Nhật ký vòng đời chuẩn SMC v2.2).
+"""Kiểm thử toàn diện mô-đun fvg.py (Fair Value Gap & Nhật ký vòng đời chuẩn SMC v2.3).
 
 Bao gồm:
 1. Test ngưỡng lọc kích thước tối thiểu gap_size >= gamma * ATR[i-1] với số chẵn nhị phân chính xác (dấu >=).
@@ -28,13 +28,20 @@ Bao gồm:
     - gap_size >= gamma * atr_ref; Bullish near_edge > far_edge; Bearish ngược lại.
 14. Test bất biến theo tiền tố (Prefix Invariance Test) đối chiếu 100% mọi thuộc tính FVG và Lifecycle.
 15. Test get_active_fvg_at toàn diện:
-    - Hết active sau INVALIDATED / EXPIRED.
-    - Cờ is_tested bật sau TESTED.
-    - Bộ lọc valid_only loại bỏ spans_gap=True.
+    - Hết active sau INVALIDATED / EXPIRED; cờ is_tested bật sau TESTED.
+    - Bộ lọc valid_only: Loại bỏ FVG spans_gap=True khi valid_only=True, giữ lại khi valid_only=False.
     - Hỗ trợ Timestamp có múi giờ (UTC, Asia/Ho_Chi_Minh) không lỗi .dt.
 16. Test load_fvg bảo toàn các FVG warm-up còn sống tại mốc start_date.
-17. Test kiểm tra đầu vào và bảo vệ chống NaN/NaT/trùng lặp thời gian/thiếu cột.
+17. Test kiểm tra đầu vào, bảo vệ chống NaN/NaT/trùng lặp thời gian/thiếu cột, và hỗ trợ time_utc có múi giờ (UTC hoặc địa phương) khớp 100% với bản UTC naive.
 18. Thống kê phân bố FVG theo năm và theo hướng trên tập Development 2018–2025 (khóa hồi quy).
+19. Test ca biên nghiêm ngặt:
+    - Ca bằng nhau: Low[i] == High[i-2] (và Bearish) với gamma=0.0 không được sinh FVG (kiểm tra dấu > nghiêm ngặt).
+    - Biên 14 nến: Cùng một gap, đặt ở nến 13 (không có FVG do ATR[12]=NaN), đặt ở nến 14 (có FVG do ATR[13] hợp lệ).
+    - Nến chưa đủ 14 nến khởi động ATR và atr_ref <= 0.
+20. Test đối chiếu vét cạn (Brute-force Exhaustive Comparison):
+    - Chạy qua nhiều seed (42, 2024, 7777), chèn khoảng trống thời gian (>1h và 48h cuối tuần), tăng M=24 (PRIMARY).
+    - Khẳng định không qua trống rỗng: Có FVG, có cả spans_gap=True/False, và đủ cả 4 loại sự kiện (CREATED, TESTED, INVALIDATED, EXPIRED).
+    - Đối chiếu 100% bit-for-bit từng cột FVG và Lifecycle với hàm ngây thơ độc lập.
 """
 
 from __future__ import annotations
@@ -698,6 +705,36 @@ class TestFVGModule(unittest.TestCase):
         res_tz_vn = get_active_fvg_at(fvg_df, lc_df, tz_vn)
         self.assertEqual(len(res_tz_vn), 1)
 
+        # 6. Kiểm tra bộ lọc valid_only với FVG spans_gap=True:
+        # Tạo chuỗi nến có 1 khoảng trống thời gian > 1h (nhảy 2h từ 14:00 đến 16:00) nằm giữa bộ ba nến [12, 13, 14]
+        times_gap = list(pd.date_range("2024-01-02 00:00", periods=14, freq="1h"))
+        times_gap.append(pd.Timestamp("2024-01-02 16:00"))  # Nến 14 nhảy qua khoảng trống > 1h
+        times_gap.append(pd.Timestamp("2024-01-02 17:00"))
+        gap_df = pd.DataFrame({
+            "time_utc": times_gap,
+            "open": [105.0] * 16,
+            "high": [110.0] * 16,
+            "low": [100.0] * 16,
+            "close": [105.0] * 16,
+        })
+        gap_df.loc[12, ["open", "high", "low", "close"]] = [96.0, 100.0, 95.0, 96.0]
+        gap_df.loc[14, ["open", "high", "low", "close"]] = [106.0, 120.0, 105.0, 118.0]
+        assert_candles_valid(self, gap_df)
+
+        fvg_gap, lc_gap = detect_fvg(gap_df, gamma=0.15, m=24, atr_period=14)
+        self.assertEqual(len(fvg_gap), 1)
+        self.assertTrue(fvg_gap.iloc[0]["spans_gap"], "FVG qua khoảng trống thời gian > 1h phải có spans_gap=True")
+        t_gap_avail = fvg_gap.iloc[0]["time_available"]
+
+        # Khẳng định valid_only=True LOẠI BỎ FVG spans_gap=True (kết quả rỗng)
+        act_valid = get_active_fvg_at(fvg_gap, lc_gap, t_gap_avail, valid_only=True)
+        self.assertTrue(act_valid.empty, "valid_only=True bắt buộc phải loại bỏ FVG có spans_gap=True")
+
+        # Khẳng định valid_only=False GIỮ LẠI FVG spans_gap=True
+        act_all = get_active_fvg_at(fvg_gap, lc_gap, t_gap_avail, valid_only=False)
+        self.assertEqual(len(act_all), 1, "valid_only=False bắt buộc phải giữ lại FVG có spans_gap=True")
+        self.assertTrue(act_all.iloc[0]["spans_gap"])
+
     def test_16_load_fvg_preserves_active_warmup_fvgs(self):
         """16. load_fvg: Bảo toàn các FVG tạo trước start_date nhưng còn sống tại start_date."""
         fvg_df, lc_df = load_fvg("2018-01-01", "2025-06-30", warmup_months=None)
@@ -759,6 +796,29 @@ class TestFVGModule(unittest.TestCase):
         with self.assertRaises(KeyError):
             detect_fvg(pd.DataFrame(columns=["a", "b"]))
 
+        # 5. time_utc có múi giờ: detect_fvg trên chuỗi có tz (UTC hoặc UTC+7) phải khớp 100% với bản không tz
+        df_naive = _make_steady_candles(20)
+        df_naive.loc[12, ["open", "high", "low", "close"]] = [96.0, 100.0, 95.0, 96.0]
+        df_naive.loc[14, ["open", "high", "low", "close"]] = [106.0, 120.0, 105.0, 118.0]
+        assert_candles_valid(self, df_naive)
+
+        fvg_naive, lc_naive = detect_fvg(df_naive, gamma=0.15, m=24)
+        self.assertEqual(len(fvg_naive), 1)
+
+        # Múi giờ UTC-aware
+        df_tz_utc = df_naive.copy()
+        df_tz_utc["time_utc"] = df_tz_utc["time_utc"].dt.tz_localize("UTC")
+        fvg_tz_utc, lc_tz_utc = detect_fvg(df_tz_utc, gamma=0.15, m=24)
+        pd.testing.assert_frame_equal(fvg_naive, fvg_tz_utc)
+        pd.testing.assert_frame_equal(lc_naive, lc_tz_utc)
+
+        # Múi giờ địa phương (Asia/Ho_Chi_Minh: UTC+7)
+        df_tz_vn = df_naive.copy()
+        df_tz_vn["time_utc"] = df_tz_vn["time_utc"].dt.tz_localize("UTC").dt.tz_convert("Asia/Ho_Chi_Minh")
+        fvg_tz_vn, lc_tz_vn = detect_fvg(df_tz_vn, gamma=0.15, m=24)
+        pd.testing.assert_frame_equal(fvg_naive, fvg_tz_vn)
+        pd.testing.assert_frame_equal(lc_naive, lc_tz_vn)
+
     def test_18_annual_fvg_distribution_regression_lock(self):
         """18. THỐNG KÊ PHÂN BỐ FVG THEO NĂM TRÊN TẬP DEVELOPMENT (2018–2025):
 
@@ -789,13 +849,15 @@ class TestFVGModule(unittest.TestCase):
     def test_19_exact_equality_and_uninitialized_atr_boundary(self):
         """19. Ca biên nghiêm ngặt:
 
-        - Low[i] == High[i-2] (hoặc High[i] == Low[i-2]): Không được sinh FVG.
-        - Nến chưa có giá trị ATR (14 nến đầu): Không sinh FVG dù gap lớn.
+        - Ca bằng nhau: Low[i] == High[i-2] (hoặc High[i] == Low[i-2]) với gamma=0.0 không được sinh FVG.
+        - Biên 14 nến: Cùng một gap, đặt ở nến 13 (không có FVG do ATR[12]=NaN), đặt ở nến 14 (có FVG do ATR[13] hợp lệ).
+        - Nến chưa đủ 14 nến khởi động ATR: Không sinh FVG.
         - atr_ref <= 0 (dữ liệu phẳng dị thường): Không sinh FVG.
         """
         base_df = _make_steady_candles(14, high=108.0, low=100.0, close=104.0)
 
-        # 1. Ca bằng nhau nghiêm ngặt phía Bullish: Low[14] == High[12] = 108.0
+        # 1. Ca bằng nhau nghiêm ngặt phía Bullish: Low[14] == High[12] = 108.0 với gamma=0.0
+        # Nếu code dùng >= thay vì > thì với gamma=0.0 (min_gap=0.0), gap=0.0 >= 0.0 sẽ sinh FVG sai
         bar_eq_bull = pd.DataFrame([{
             "time_utc": pd.Timestamp("2024-01-02 14:00"),
             "open": 110.0,
@@ -805,10 +867,10 @@ class TestFVGModule(unittest.TestCase):
         }])
         df_eq_bull = pd.concat([base_df, bar_eq_bull], ignore_index=True)
         assert_candles_valid(self, df_eq_bull)
-        fvg_eq_b, _ = detect_fvg(df_eq_bull, gamma=0.15, atr_period=14)
-        self.assertTrue(fvg_eq_b.empty, "Low[i] == High[i-2] tuyệt đối KHÔNG phải là Bullish FVG")
+        fvg_eq_b, _ = detect_fvg(df_eq_bull, gamma=0.0, atr_period=14)
+        self.assertTrue(fvg_eq_b.empty, "Low[i] == High[i-2] với gamma=0.0 tuyệt đối KHÔNG phải là Bullish FVG (bắt buộc > nghiêm ngặt)")
 
-        # 2. Ca bằng nhau nghiêm ngặt phía Bearish: High[14] == Low[12] = 100.0
+        # 2. Ca bằng nhau nghiêm ngặt phía Bearish: High[14] == Low[12] = 100.0 với gamma=0.0
         bar_eq_bear = pd.DataFrame([{
             "time_utc": pd.Timestamp("2024-01-02 14:00"),
             "open": 98.0,
@@ -818,11 +880,29 @@ class TestFVGModule(unittest.TestCase):
         }])
         df_eq_bear = pd.concat([base_df, bar_eq_bear], ignore_index=True)
         assert_candles_valid(self, df_eq_bear)
-        fvg_eq_bear, _ = detect_fvg(df_eq_bear, gamma=0.15, atr_period=14)
-        self.assertTrue(fvg_eq_bear.empty, "High[i] == Low[i-2] tuyệt đối KHÔNG phải là Bearish FVG")
+        fvg_eq_bear, _ = detect_fvg(df_eq_bear, gamma=0.0, atr_period=14)
+        self.assertTrue(fvg_eq_bear.empty, "High[i] == Low[i-2] với gamma=0.0 tuyệt đối KHÔNG phải là Bearish FVG (bắt buộc < nghiêm ngặt)")
 
-        # 3. Nến chưa đủ 14 nến khởi động ATR (i <= 13 -> atr_ref = NaN)
-        # Tạo chuỗi ngắn 10 nến có gap khổng lồ tại nến 5
+        # 3. Biên 14 nến khởi động ATR: Cùng một gap, một lần đặt ở nến 13 (không có FVG do ATR[12]=NaN), một lần ở nến 14 (có FVG do ATR[13] hợp lệ)
+        # Lần 1: Chuỗi 14 nến (chỉ số 0..13), đặt gap tại nến 13 (Low[13] = 115.0 > High[11] = 108.0)
+        # Nến 13 có atr_ref = ATR[12] = NaN (chưa đủ 14 nến khởi động) -> Bắt buộc KHÔNG sinh FVG
+        df_14_bars = _make_steady_candles(14, high=108.0, low=100.0, close=104.0)
+        df_14_bars.loc[13, ["open", "high", "low", "close"]] = [118.0, 125.0, 115.0, 120.0]
+        assert_candles_valid(self, df_14_bars)
+        fvg_13, _ = detect_fvg(df_14_bars, gamma=0.15, atr_period=14)
+        self.assertTrue(fvg_13.empty, "Nến 13 có atr_ref=ATR[12]=NaN (chưa đủ 14 nến), bắt buộc KHÔNG sinh FVG")
+
+        # Lần 2: Chuỗi 15 nến (chỉ số 0..14), đặt đúng gap đó tại nến 14 (Low[14] = 115.0 > High[12] = 108.0)
+        # Nến 14 có atr_ref = ATR[13] = 8.0 (đủ 14 nến đầu) -> Bắt buộc sinh đúng 1 FVG tại nến 14
+        df_15_bars = _make_steady_candles(15, high=108.0, low=100.0, close=104.0)
+        df_15_bars.loc[14, ["open", "high", "low", "close"]] = [118.0, 125.0, 115.0, 120.0]
+        assert_candles_valid(self, df_15_bars)
+        fvg_14, _ = detect_fvg(df_15_bars, gamma=0.15, atr_period=14)
+        self.assertEqual(len(fvg_14), 1, "Nến 14 có atr_ref=ATR[13] đã khởi động, bắt buộc PHẢI sinh FVG")
+        self.assertEqual(fvg_14.iloc[0]["bar_index"], 14)
+        self.assertAlmostEqual(fvg_14.iloc[0]["gap_size"], 7.0)
+
+        # 4. Nến chưa đủ 14 nến khởi động ATR tổng quát (chuỗi ngắn 10 nến)
         short_times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h")
         short_df = pd.DataFrame({
             "time_utc": short_times,
@@ -831,13 +911,12 @@ class TestFVGModule(unittest.TestCase):
             "low": [95.0] * 10,
             "close": [100.0] * 10,
         })
-        # Nến 5 tạo gap khổng lồ so với nến 3
         short_df.loc[5, ["open", "high", "low", "close"]] = [200.0, 220.0, 190.0, 210.0]
         assert_candles_valid(self, short_df)
         fvg_uninit, _ = detect_fvg(short_df, gamma=0.15, atr_period=14)
         self.assertTrue(fvg_uninit.empty, "Nến chưa có giá trị ATR hợp lệ không được sinh FVG")
 
-        # 4. atr_ref <= 0 (dữ liệu phẳng hoàn toàn, TR = 0)
+        # 5. atr_ref <= 0 (dữ liệu phẳng hoàn toàn, TR = 0)
         flat_times = pd.date_range("2024-01-02 00:00", periods=15, freq="1h")
         flat_df = pd.DataFrame({
             "time_utc": flat_times,
@@ -846,7 +925,6 @@ class TestFVGModule(unittest.TestCase):
             "low": [100.0] * 15,
             "close": [100.0] * 15,
         })
-        # Nến 14 nhảy vọt tạo gap, nhưng atr_ref = atr[13] = 0.0 <= 0
         flat_df.loc[14, ["open", "high", "low", "close"]] = [110.0, 120.0, 105.0, 115.0]
         assert_candles_valid(self, flat_df)
         fvg_flat, _ = detect_fvg(flat_df, gamma=0.15, atr_period=14)
@@ -855,10 +933,12 @@ class TestFVGModule(unittest.TestCase):
     def test_20_brute_force_exhaustive_randomized_synthetic_comparison(self):
         """20. ĐỐI CHIẾU VÉT CẠN (BRUTE-FORCE EXHAUSTIVE COMPARISON) TRÊN DỮ LIỆU GIẢ NGẪU NHIÊN:
 
-        Sinh 120 nến ngẫu nhiên có seed cố định, chạy đối chiếu 100% từng dòng FVG và
-        chuỗi sự kiện vòng đời với hàm tham chiếu ngây thơ độc lập (naive ground-truth).
+        Chạy qua nhiều seed ngẫu nhiên, chèn khoảng trống thời gian (>1h và 48h cuối tuần),
+        tăng m=24 (PRIMARY), và khẳng định bắt buộc có FVG cùng đủ cả 4 loại sự kiện
+        (CREATED, TESTED, INVALIDATED, EXPIRED) để test không thể qua trống rỗng.
+        Đối chiếu 100% từng dòng FVG và chuỗi sự kiện vòng đời với hàm tham chiếu ngây thơ độc lập.
         """
-        def _naive_reference_fvg(df, gamma=0.15, m=10, atr_period=14):
+        def _naive_reference_fvg(df, gamma=0.15, m=24, atr_period=14):
             n = len(df)
             highs = df["high"].to_numpy(dtype=float)
             lows = df["low"].to_numpy(dtype=float)
@@ -966,39 +1046,69 @@ class TestFVGModule(unittest.TestCase):
                 del ref_lc_df["_ord"]
             return ref_fvg_df, ref_lc_df
 
-        rng = np.random.default_rng(2024)
-        n_bars = 120
-        p = 100.0
-        records = []
-        t = pd.Timestamp("2024-01-01 00:00")
-        for _ in range(n_bars):
-            jump = rng.normal(0, 2.5)
-            o = p
-            c = p + jump
-            h = max(o, c) + abs(rng.normal(0, 1.2))
-            l = min(o, c) - abs(rng.normal(0, 1.2))
-            records.append({"time_utc": t, "open": o, "high": h, "low": l, "close": c})
-            p = c
-            t += pd.Timedelta("1h")
-        syn_df = pd.DataFrame(records)
-        assert_candles_valid(self, syn_df)
+        seeds = [42, 2024, 7777]
+        total_fvgs_all = 0
+        all_event_types_found = set()
 
-        act_fvg, act_lc = detect_fvg(syn_df, gamma=0.15, m=10, atr_period=14)
-        ref_fvg, ref_lc = _naive_reference_fvg(syn_df, gamma=0.15, m=10, atr_period=14)
+        for seed in seeds:
+            rng = np.random.default_rng(seed)
+            n_bars = 200
+            p = 100.0
+            records = []
+            t = pd.Timestamp("2024-01-01 00:00")
+            for i in range(n_bars):
+                jump = rng.normal(0, 2.5)
+                # Chèn các khoảng trống thời gian và bước nhảy giá để sinh cả spans_gap=True và spans_gap=False
+                if i == 50:
+                    t += pd.Timedelta("2h")  # bước nhảy giờ nghỉ bảo trì (>1h)
+                    jump += 12.0             # nhảy giá tạo Bullish FVG qua khoảng trống
+                elif i == 120:
+                    t += pd.Timedelta("48h") # bước nhảy 48h cuối tuần
+                    jump -= 12.0             # sụt giá tạo Bearish FVG qua cuối tuần
+                o = p
+                c = p + jump
+                h = max(o, c) + abs(rng.normal(0, 1.2))
+                l = min(o, c) - abs(rng.normal(0, 1.2))
+                records.append({"time_utc": t, "open": o, "high": h, "low": l, "close": c})
+                p = c
+                t += pd.Timedelta("1h")
+            syn_df = pd.DataFrame(records)
+            assert_candles_valid(self, syn_df)
 
-        self.assertEqual(len(act_fvg), len(ref_fvg))
-        self.assertEqual(len(act_lc), len(ref_lc))
+            act_fvg, act_lc = detect_fvg(syn_df, gamma=0.15, m=24, atr_period=14)
+            ref_fvg, ref_lc = _naive_reference_fvg(syn_df, gamma=0.15, m=24, atr_period=14)
 
-        # Đối chiếu 100% cột bảng FVG
-        for col in ["direction", "bar_index", "time_candle", "time_available", "spans_gap"]:
-            self.assertTrue((act_fvg[col].values == ref_fvg[col].values).all(), f"Khác biệt cột FVG '{col}'")
-        for col in ["top", "bottom", "near_edge", "far_edge", "gap_size", "atr_ref"]:
-            self.assertTrue(np.allclose(act_fvg[col].values, ref_fvg[col].values), f"Khác biệt cột số thực FVG '{col}'")
+            # Khẳng định không thể qua trống rỗng (Non-vacuous assertions)
+            self.assertGreater(len(act_fvg), 0, f"Seed {seed}: Phải phát hiện ít nhất một FVG")
+            self.assertTrue((act_fvg["spans_gap"] == True).any(), f"Seed {seed}: Phải có ít nhất một FVG spans_gap=True")
+            self.assertTrue((act_fvg["spans_gap"] == False).any(), f"Seed {seed}: Phải có ít nhất một FVG spans_gap=False")
 
-        # Đối chiếu 100% cột bảng Lifecycle
-        for col in ["event_type", "bar_index", "time_candle", "time_available"]:
-            self.assertTrue((act_lc[col].values == ref_lc[col].values).all(), f"Khác biệt cột LC '{col}'")
-        self.assertTrue(np.allclose(act_lc["price_trigger"].fillna(-999), ref_lc["price_trigger"].fillna(-999)))
+            # Khẳng định đủ cả 4 loại sự kiện vòng đời
+            recorded_events = set(act_lc["event_type"].unique())
+            expected_events = {"CREATED", "TESTED", "INVALIDATED", "EXPIRED"}
+            self.assertEqual(recorded_events, expected_events, f"Seed {seed}: Thiếu loại sự kiện: {expected_events - recorded_events}")
+            for ev in expected_events:
+                self.assertGreater((act_lc["event_type"] == ev).sum(), 0, f"Seed {seed}: Số lượng sự kiện {ev} phải > 0")
+
+            total_fvgs_all += len(act_fvg)
+            all_event_types_found.update(recorded_events)
+
+            self.assertEqual(len(act_fvg), len(ref_fvg), f"Seed {seed}: Lệch số lượng FVG")
+            self.assertEqual(len(act_lc), len(ref_lc), f"Seed {seed}: Lệch số lượng sự kiện vòng đời")
+
+            # Đối chiếu 100% cột bảng FVG
+            for col in ["direction", "bar_index", "time_candle", "time_available", "spans_gap"]:
+                self.assertTrue((act_fvg[col].values == ref_fvg[col].values).all(), f"Khác biệt cột FVG '{col}' tại seed {seed}")
+            for col in ["top", "bottom", "near_edge", "far_edge", "gap_size", "atr_ref"]:
+                self.assertTrue(np.allclose(act_fvg[col].values, ref_fvg[col].values), f"Khác biệt cột số thực FVG '{col}' tại seed {seed}")
+
+            # Đối chiếu 100% cột bảng Lifecycle
+            for col in ["event_type", "bar_index", "time_candle", "time_available"]:
+                self.assertTrue((act_lc[col].values == ref_lc[col].values).all(), f"Khác biệt cột LC '{col}' tại seed {seed}")
+            self.assertTrue(np.allclose(act_lc["price_trigger"].fillna(-999), ref_lc["price_trigger"].fillna(-999)))
+
+        self.assertGreater(total_fvgs_all, 50, "Tổng số FVG qua các seed phải dồi dào (>50)")
+        self.assertEqual(all_event_types_found, {"CREATED", "TESTED", "INVALIDATED", "EXPIRED"})
 
 
 if __name__ == "__main__":
