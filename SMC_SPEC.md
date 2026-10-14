@@ -105,17 +105,18 @@ Tại mỗi nến H1 $t$, việc kiểm tra phá vỡ được đối chiếu v�
      **Mức đó chuyển sang `BROKEN`, ĐỒNG THỜI TOÀN BỘ các Swing Low chưa bị phá khác có giá $\ge \min(P, Close[t])$ CŨNG LẬP TỨC CHUYỂN SANG `BROKEN`.**
 
 ### 3.4. Quy tắc khởi động (Warm-up Period Rule) & Bằng chứng hội tụ thực nghiệm
-- **Vấn đề rủi ro khởi động:** Thuật toán cấu trúc thị trường luôn khởi tạo ở trạng thái `NEUTRAL`. Nếu nạp dữ liệu bắt đầu đúng ngày đầu tiên của giai đoạn phân tích (ví dụ `2018-01-01`), những nến đầu tiên hoàn toàn chưa có swing nào khả dụng (do cần tối thiểu $2k+1$ nến và độ trễ xác nhận $k$ nến). Khi mức swing đầu tiên bị phá vỡ, sự kiện đó bị gắn nhãn `INIT_BREAK` và bị bỏ qua không tạo tín hiệu, đồng thời trạng thái xu hướng trong những ngày đầu tháng 01/2018 bị sai lệch so với diễn biến tự nhiên của thị trường. Hơn nữa, danh sách các swing chưa bị phá từ quá khứ quyết định mức nào là Protected Level hiện tại.
+- **Vấn đề rủi ro khởi động:** Thuật toán cấu trúc thị trường luôn khởi tạo ở trạng thái `NEUTRAL`. Nếu nạp dữ liệu bắt đầu đúng ngày đầu tiên của giai đoạn phân tích (ví dụ `2018-01-01`), những nến đầu tiên hoàn toàn chưa có swing nào khả dụng (do cần tối thiểu $2k+1$ nến và độ trễ xác nhận $k$ nến). Khi mức swing đầu tiên bị phá vỡ, sự kiện đó bị gắn nhãn `INIT_BREAK` và bị bỏ qua không tạo tín hiệu, đồng thời trạng thái xu hướng trong những ngày đầu tháng 01/2018 bị sai lệch so với diễn biến tự nhiên của thị trường. Hơn nữa, danh sách các swing chưa bị phá từ quá khứ quyết định mức nào là Protected Level hiện tại; ký ức cấu trúc có thể kéo dài trên 3 năm (thực nghiệm cho thấy Swing High 1374.99 từ năm 2016 vẫn chi phối đến tận ngày 20/06/2019).
 - **Bằng chứng hội tụ thực nghiệm (Warm-up Convergence Proof):**
-  Thử nghiệm đối chứng trên dữ liệu H1 thật với các độ dài warm-up khác nhau cho giai đoạn đánh giá 2018–2025:
-  - Khởi động 6 tháng (từ `2017-06-01`): Khớp 100% 400 sự kiện đầu tiên (8 tháng liên tục), sau đó lệch 5 sự kiện do thiếu các swing hình thành từ đầu năm 2017.
-  - Khởi động 12 tháng (từ `2017-01-01`): Khớp 100% 900 sự kiện đầu tiên (18 tháng liên tục), chỉ lệch 2 sự kiện do một swing từ năm 2016 tại 1374.99.
-  - **Khởi động 24 tháng (từ `2016-01-01`) so với Toàn bộ lịch sử 42 tháng (từ `2014-06-01`): HỘI TỤ TUYỆT ĐỐI 100% BIT-FOR-BIT** trên toàn bộ 4.486 sự kiện cấu trúc của cả giai đoạn 2018–2025! Toàn bộ các swing cũ từ 2014–2015 đều đã bị phá vỡ hoặc che khuất trong các biến động lớn của năm 2015, khiến trạng thái tại 2018-01-01 hoàn toàn độc lập với điểm bắt đầu trước đó.
-- **Quy tắc chuẩn hóa bắt buộc áp dụng cho MỌI lớp dữ liệu (Development, Robustness, Holdout):**
-  1. Với mọi khoảng thời gian đánh giá $[T_{\text{start}}, T_{\text{end}}]$, **BẮT BUỘC nạp dữ liệu khởi động tối thiểu 24 tháng** ($T_{\text{warmup}} = T_{\text{start}} - 24\text{ months}$), hoặc nạp toàn bộ phần dữ liệu lịch sử liền trước có trong kho dữ liệu DuckDB.
-  2. Toàn bộ chuỗi Swings và Cấu trúc được tính toán liên tục từ $T_{\text{warmup}}$.
-  3. **Chuẩn hóa mốc cắt lọc:** Sau khi tính toán xong, chỉ giữ lại các sự kiện có $\mathbf{time\_available \ge T_{\text{start}}}$ (sử dụng $time\_available$ thay vì $time\_candle$ để không bỏ sót nến 23:00 của ngày hôm trước vốn đóng cửa và khả dụng đúng 00:00 ngày $T_{\text{start}}$).
-  4. Sử dụng hàm wrapper chuẩn hóa **`load_structure(start_date, end_date, warmup_months=24)`** để tự động hóa toàn bộ quy trình, ngăn ngừa triệt để lỗi quên warm-up.
+  Thử nghiệm đối chứng trên dữ liệu H1 thật với các độ dài warm-up khác nhau cho giai đoạn đánh giá 2018–2025 (khi ghép từng sự kiện theo `time_available` và `event_type`):
+  - Khởi động 6 tháng (từ `2017-06-01`): Khớp thực sự 99,889% (4.481/4.486 sự kiện trùng khớp hoàn toàn), chỉ lệch 5 sự kiện do thiếu các swing hình thành từ đầu năm 2017.
+  - Khởi động 12 tháng (từ `2017-01-01`): Khớp thực sự 99,978% (4.485/4.486 sự kiện trùng khớp hoàn toàn), chỉ lệch đúng 1 sự kiện duy nhất vào ngày 20/06/2019 do ảnh hưởng của đỉnh swing 1374.99 từ năm 2016.
+  - **Khởi động 24 tháng (từ `2016-01-01`) so với Toàn bộ lịch sử 42 tháng (từ `2014-06-01`): TRÙNG KHỚP HOÀN HẢO 100% TRÊN MỌI THUỘC TÍNH THỊ TRƯỜNG** trên toàn bộ 4.486 sự kiện cấu trúc của cả giai đoạn 2018–2025 (`time_candle`, `time_available`, `event_type`, `price_broken`, `close_price`, `prior_trend`, `new_trend`). Toàn bộ các swing cũ từ 2014–2015 đều đã bị phá vỡ hoặc che khuất trong các biến động lớn của năm 2015, khiến trạng thái tại 2018-01-01 hoàn toàn độc lập với điểm bắt đầu trước đó.
+- **Quy tắc chuẩn hóa chính thức (Mặc định toàn bộ lịch sử):**
+  1. **Quy tắc chính:** Với mọi khoảng thời gian đánh giá $[T_{\text{start}}, T_{\text{end}}]$, mặc định **NẠP TOÀN BỘ LỊCH SỬ CÓ TRƯỚC $T_{\text{start}}$** từ đầu kho dữ liệu DuckDB (`warmup_months=None`). Vì việc nạp toàn bộ lịch sử (~100k nến H1 từ năm 2014) chỉ tốn chưa tới 1 giây và phát hiện cấu trúc chỉ tốn ~4 giây, đây là giải pháp 0 bậc tự do hoàn hảo nhất, đảm bảo tính nhất quán tuyệt đối cho cả Development, Robustness và Holdout mà không cần chạm vào dữ liệu để dò tìm thời gian hội tụ.
+  2. Thời lượng 24 tháng chỉ là bằng chứng thực nghiệm tối thiểu cho tập Development.
+  3. **Chuẩn hóa mốc cắt lọc:** Sau khi tính toán liên tục từ đầu dữ liệu nạp, chỉ giữ lại các sự kiện có $\mathbf{time\_available \ge T_{\text{start}}}$ (sử dụng $time\_available$ thay vì $time\_candle$ để không bỏ sót nến 23:00 của ngày hôm trước vốn đóng cửa và khả dụng đúng 00:00 ngày $T_{\text{start}}$).
+  4. Sử dụng hàm wrapper chuẩn hóa **`load_structure(start_date, end_date, warmup_months=None)`** làm giao diện chính thức.
+  5. **Lưu ý về định danh cục bộ:** Các cột `bar_index`, `structure_id`, `broken_swing_id` chỉ có ý nghĩa cục bộ trong từng lần nạp. Mọi mô-đun hạ nguồn (FVG, Liquidity sweeps) TUYỆT ĐỐI KHÔNG dùng các ID/index này để liên kết mà phải ghép bảng theo mốc thời gian vật lý (`time_candle`, `time_available`).
 
 ---
 
@@ -302,8 +303,8 @@ Thống kê thực nghiệm từ 4.486 sự kiện cấu trúc (`load_structure(
 | **TỔNG CỘNG** | **1.322** | **773** | **1.618** | **773** | **4.486** |
 
 *Đặc tính định lượng & 5 Bất biến vật lý đã được chứng minh 100%:*
-1. **Không có bất kỳ sự kiện INIT_BREAK nào:** Giai đoạn warm-up 24 tháng đã loại bỏ hoàn toàn sự kiện khởi tạo nhân tạo; xu hướng mở đầu năm 2018 là `BULLISH` tự nhiên.
-2. **Tính đối xứng luân phiên hoàn hảo của CHoCH:** $N_{\text{BULLISH\_CHOCH}} = 773$ và $N_{\text{BEARISH\_CHOCH}} = 773$ bằng nhau chằn chặn qua toàn bộ 7.5 năm. Đây là hệ quả cấu trúc logic của việc đảo chiều trạng thái nhị phân.
+1. **Không có bất kỳ sự kiện INIT_BREAK nào:** Quy tắc warm-up nạp toàn bộ lịch sử (hoặc tối thiểu 24 tháng) đã loại bỏ hoàn toàn sự kiện khởi tạo nhân tạo; xu hướng mở đầu năm 2018 là `BULLISH` tự nhiên đã được kiểm chứng thực nghiệm (kế thừa từ sự kiện `BULLISH_BOS` ngày 29/12/2017 và mở đầu bằng `BULLISH_BOS` phá đỉnh 1307.41 lúc 07:00 ngày 02/01/2018).
+2. **Tính đối xứng luân phiên hoàn hảo của CHoCH:** $N_{\text{BULLISH\_CHOCH}} = 773$ và $N_{\text{BEARISH\_CHOCH}} = 773$ bằng nhau chằn chặt qua toàn bộ 7.5 năm. Đây là hệ quả cấu trúc logic của việc đảo chiều trạng thái nhị phân.
 3. **Tỷ lệ Tiếp diễn trên Đảo chiều:** Tỷ lệ $\frac{\text{BOS}}{\text{CHoCH}} \approx \frac{2.940}{1.546} \approx 1,90$ (khoảng 1,8–2,2 BOS cho mỗi lần đổi chiều).
 4. **Nhịp độ đổi xu hướng:** Trung bình ~206 lần đổi chiều/năm (~28 nến H1 mỗi chế độ xu hướng).
 5. **Khớp 5 bất biến vật lý:** Tối đa 1 sự kiện/nến; tính liên tục Markov ($prior\_trend_{n+1} = new\_trend_n$); First Break Only (không trùng $broken\_swing\_id$); Zero Look-ahead ($time\_available \le time\_candle$); Giá đóng cửa vượt đúng phía.

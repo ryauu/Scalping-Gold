@@ -67,6 +67,12 @@ def detect_structure(
         - close_price: float (giá đóng cửa của nến t)
         - prior_trend: str ('NEUTRAL', 'BULLISH', 'BEARISH')
         - new_trend: str ('BULLISH', 'BEARISH')
+
+    LƯU Ý QUAN TRỌNG VỀ ĐỊNH DANH (IDENTIFIERS):
+        bar_index, structure_id, broken_swing_id, broken_swing_bar_index chỉ có ý nghĩa
+        cục bộ trong từng lần nạp dữ liệu (tương đối theo hàng đầu tiên được nạp).
+        Các mô-đun hạ nguồn (FVG, Liquidity sweeps) TUYỆT ĐỐI KHÔNG dùng các ID/index
+        cục bộ này để ghép nối, mà phải nối bảng theo mốc thời gian vật lý (time_candle, time_available).
     """
     columns_out = [
         "structure_id",
@@ -305,21 +311,29 @@ def get_structure_available_at(
 def load_structure(
     start_date: str,
     end_date: str,
-    warmup_months: int = 24,
+    warmup_months: int | None = None,
     k: int = DEFAULT_K,
     bar_duration: pd.Timedelta = DEFAULT_H1_DURATION,
 ) -> pd.DataFrame:
     """Nạp dữ liệu H1 kèm giai đoạn khởi động (warm-up) và phát hiện cấu trúc chuẩn SMC.
 
     Tự động đảm bảo quy tắc warm-up để triệt tiêu ảnh hưởng của trạng thái ban đầu NEUTRAL:
-    1. Nạp nến H1 từ start_date lùi về trước warmup_months (mặc định 24 tháng để hội tụ 100%).
-    2. Tính toán liên tục Swings và Cấu trúc thị trường trên toàn bộ dải dữ liệu [warmup_start, end_date].
-    3. Lọc lấy các sự kiện cấu trúc có time_available >= start_date (chuẩn UTC naive).
+    1. Nếu warmup_months=None (mặc định): Nạp toàn bộ lịch sử từ đầu kho dữ liệu DuckDB
+       (từ 2014, ~100k nến H1, thời gian nạp <1s). Đây là quy tắc chuẩn hóa chính thức
+       đảm bảo không còn bất kỳ giả định hay phân kỳ ký ức nào qua các tập Development, Robustness, Holdout.
+    2. Nếu warmup_months là số nguyên: Nạp từ start_date lùi về trước warmup_months tháng (ví dụ 24 tháng).
+    3. Tính toán liên tục Swings và Cấu trúc thị trường trên toàn bộ dải dữ liệu [warmup_start, end_date].
+    4. Lọc lấy các sự kiện cấu trúc có time_available >= start_date (chuẩn UTC naive).
+
+    Lưu ý về định danh:
+        bar_index và structure_id là chỉ số cục bộ của lát cắt dữ liệu.
+        Khi ghép nối với các bảng khác (FVG, sweeps), luôn ghép theo mốc thời gian vật lý
+        (time_candle, time_available).
 
     Tham số:
         start_date: Ngày bắt đầu lấy tín hiệu (chuỗi 'YYYY-MM-DD').
         end_date: Ngày kết thúc (chuỗi 'YYYY-MM-DD').
-        warmup_months: Số tháng khởi động nạp trước start_date (mặc định 24 tháng).
+        warmup_months: Số tháng khởi động nạp trước start_date (mặc định None: nạp từ đầu kho dữ liệu).
         k: Tham số k phát hiện swing (mặc định PRIMARY k=3).
         bar_duration: Độ dài nến (mặc định 1 giờ đối với H1).
 
@@ -328,11 +342,14 @@ def load_structure(
     """
     from ..data import load_h1
 
-    ts_start = pd.to_datetime(start_date)
-    ts_warmup = ts_start - pd.DateOffset(months=warmup_months)
-    warmup_start_str = ts_warmup.strftime("%Y-%m-%d")
+    if warmup_months is None:
+        df_h1 = load_h1(start_date=None, end_date=end_date)
+    else:
+        ts_start = pd.to_datetime(start_date)
+        ts_warmup = ts_start - pd.DateOffset(months=warmup_months)
+        warmup_start_str = ts_warmup.strftime("%Y-%m-%d")
+        df_h1 = load_h1(warmup_start_str, end_date)
 
-    df_h1 = load_h1(warmup_start_str, end_date)
     struct_all = detect_structure(df_h1, k=k, bar_duration=bar_duration)
 
     if struct_all.empty:

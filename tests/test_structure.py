@@ -15,7 +15,7 @@ Bao gồm các bài kiểm tra toàn diện và chặt chẽ:
    - time_available > open_time: Swing chưa khả dụng, không được dùng.
    - time_available == open_time: Ca biên, swing đã khả dụng và được nến đó phá ngay (kiểm tra chặt chẽ <=).
 10. Test hai phía độc lập: Phá Swing High không làm suy giảm hoặc thay đổi danh sách unbroken Swing Lows.
-11. Test bất biến theo tiền tố (Prefix Invariance Test) trên 30 sự kiện thực tế rải đều:
+11. Test bất biến theo tiền tố (Prefix Invariance Test) trên 12 sự kiện thực tế rải đều:
     - Cắt tại biên sự kiện (b và b+1).
     - Cắt tại biên xác nhận swing (c_conf và c_conf+1) để chống rò rỉ look-ahead.
     - Đối chiếu 100% mọi cột bao gồm cả broken_swing_id và broken_swing_bar_index.
@@ -23,7 +23,8 @@ Bao gồm các bài kiểm tra toàn diện và chặt chẽ:
     thiếu cột (cả df rỗng lẫn df có dữ liệu).
 13. Test get_structure_available_at: Kiểm tra timing khả dụng và truy vấn bằng Timestamp có múi giờ (UTC+7).
 14. Test Hội tụ Warm-up Period (Empirical Convergence Test):
-    Chứng minh 24 tháng warm-up hội tụ 100% bit-for-bit với toàn bộ lịch sử 42 tháng (2014-06).
+    Chứng minh 24 tháng warm-up hội tụ 100% trên toàn bộ 4.486 sự kiện của tập Development 2018-2025
+    với mặc định toàn bộ lịch sử (warmup_months=None). Kiểm tra tỷ lệ trùng khớp thực sự của 12m và 6m.
 15. Test 5 bất biến vật lý & Bảng phân bố sự kiện theo năm trên tập H1 Development (2018–2025):
     Không có INIT_BREAK, prior_trend đầu tiên không phải NEUTRAL.
 16. Test truyền swings_df rỗng một cách tường minh phải trả về DataFrame rỗng (không tự tính lại).
@@ -488,9 +489,9 @@ class TestStructureModule(unittest.TestCase):
         self.assertEqual(struct_df.iloc[1]["price_broken"], 1495.0)
 
     def test_11_prefix_invariance_on_real_h1_event_and_confirmation_boundaries(self):
-        """11. TEST BẤT BIẾN THEO TIỀN TỐ TRÊN DỮ LIỆU H1 THẬT (MẪU RỘNG 30 SỰ KIỆN + BIÊN XÁC NHẬN SWING).
+        """11. TEST BẤT BIẾN THEO TIỀN TỐ TRÊN DỮ LIỆU H1 THẬT (12 SỰ KIỆN: 3 MỖI LOẠI + BIÊN XÁC NHẬN SWING).
 
-        Lấy mẫu 30 sự kiện rải đều trên H1 năm 2020:
+        Lấy mẫu 12 sự kiện rải đều qua đủ 4 loại sự kiện (BOS/CHoCH) trên H1 năm 2020:
         1. Cắt tại biên nến sự kiện: b (chưa đóng) và b + 1 (vừa đóng).
         2. Cắt tại biên xác nhận swing bị phá: c_conf (nến i+k chưa đóng) và c_conf + 1 (nến i+k vừa đóng).
         Đối chiếu 100% mọi thuộc tính bao gồm cả broken_swing_id và broken_swing_bar_index.
@@ -666,25 +667,42 @@ class TestStructureModule(unittest.TestCase):
         self.assertEqual(len(res_tz), len(exact))
 
     def test_14_warm_up_empirical_convergence(self):
-        """14. KIỂM CHỨNG THỰC NGHIỆM HỘI TỤ WARM-UP PERIOD (24 tháng vs 42 tháng):
+        """14. KIỂM CHỨNG THỰC NGHIỆM HỘI TỤ WARM-UP TRÊN TOÀN BỘ 4.486 SỰ KIỆN DEVELOPMENT (2018–2025):
 
         Chứng minh thực nghiệm:
-        - Warm-up 24 tháng (load_structure từ 2016-01-01) cho kết quả 100% BIT-FOR-BIT IDENTICAL
-          với việc nạp toàn bộ lịch sử 42 tháng (từ 2014-06-01).
-        - Trạng thái tại 2018-01-01 hoàn toàn độc lập với điểm bắt đầu nạp.
+        - Mặc định warmup_months=None (nạp toàn bộ lịch sử từ 2014) và warmup_months=24 (từ 2016-01-01)
+          cho kết quả trùng khớp hoàn hảo 100% trên toàn bộ 4.486 sự kiện cấu trúc giai đoạn 2018–2025
+          về mọi thuộc tính thị trường (time_candle, time_available, event_type, price_broken, close_price, prior_trend, new_trend).
+        - So sánh tỷ lệ khớp thực sự (ghép theo time_available và event_type):
+          + 12 tháng warm-up khớp 99,978% (4.485/4.486 sự kiện).
+          + 6 tháng warm-up khớp 99,889% (4.481/4.486 sự kiện).
         """
-        # 1. Nạp qua load_structure với warmup_months=24 (bắt đầu từ 2016-01-01)
-        s_24m = load_structure("2018-01-01", "2019-12-31", warmup_months=24, k=3)
-        self.assertFalse(s_24m.empty)
+        # 1. Nạp với mặc định warmup_months=None (toàn bộ lịch sử từ đầu DB)
+        s_default = load_structure("2018-01-01", "2025-06-30", warmup_months=None, k=3)
+        self.assertEqual(len(s_default), 4486, "Tổng số sự kiện cấu trúc 2018-2025 phải là 4.486")
 
-        # 2. Nạp toàn bộ lịch sử từ 2014-06-01 (warmup_months=42)
-        s_42m = load_structure("2018-01-01", "2019-12-31", warmup_months=42, k=3)
+        # 2. Nạp qua load_structure với warmup_months=24 (từ 2016-01-01)
+        s_24m = load_structure("2018-01-01", "2025-06-30", warmup_months=24, k=3)
+        self.assertEqual(len(s_24m), 4486, "Số lượng sự kiện 24m phải bằng đúng 4.486")
 
-        # Khẳng định hội tụ tuyệt đối 100% bit-for-bit trên mọi thuộc tính sự kiện thị trường
-        # (bar_index là chỉ số hàng cục bộ tính từ đầu dữ liệu nạp nên không so sánh giữa 2 điểm bắt đầu khác nhau)
-        self.assertEqual(len(s_24m), len(s_42m), f"Số lượng sự kiện phải hội tụ hoàn hảo: {len(s_24m)} vs {len(s_42m)}")
-        for col in ["event_type", "time_candle", "time_available", "price_broken", "close_price", "prior_trend", "new_trend"]:
-            self.assertTrue((s_24m[col].values == s_42m[col].values).all(), f"Cột '{col}' không khớp 100% giữa 24m và 42m warmup")
+        # Khẳng định hội tụ tuyệt đối 100% trên toàn bộ 4.486 sự kiện
+        # (loại trừ bar_index và structure_id là chỉ số hàng cục bộ của lát cắt nạp)
+        market_cols = ["event_type", "time_candle", "time_available", "price_broken", "close_price", "prior_trend", "new_trend"]
+        for col in market_cols:
+            self.assertTrue(
+                (s_default[col].values == s_24m[col].values).all(),
+                f"Cột '{col}' không khớp 100% giữa warmup_months=None và warmup_months=24 trên toàn bộ 2018–2025",
+            )
+
+        # 3. Kiểm chứng tỷ lệ ghép sự kiện thực sự với 12 tháng (từ 2017-01-01)
+        s_12m = load_structure("2018-01-01", "2025-06-30", warmup_months=12, k=3)
+        m_12m = pd.merge(s_default, s_12m, on=["time_available", "event_type"])
+        self.assertEqual(len(m_12m), 4485, "Khớp thực sự 12m phải đạt 4.485 / 4.486 (99,978%)")
+
+        # 4. Kiểm chứng tỷ lệ ghép sự kiện thực sự với 6 tháng (từ 2017-06-01)
+        s_6m = load_structure("2018-01-01", "2025-06-30", warmup_months=6, k=3)
+        m_6m = pd.merge(s_default, s_6m, on=["time_available", "event_type"])
+        self.assertEqual(len(m_6m), 4481, "Khớp thực sự 6m phải đạt 4.481 / 4.486 (99,889%)")
 
     def test_15_invariants_and_annual_distribution_on_real_h1(self):
         """15. KIỂM TRA 5 BẤT BIẾN VẬT LÝ VÀ PHÂN BỐ SỰ KIỆN TRÊN H1 THẬT (2018–2025).
@@ -699,12 +717,16 @@ class TestStructureModule(unittest.TestCase):
         6. Không có sự kiện *_INIT_BREAK nào trong tập sau warm-up.
         7. prior_trend của sự kiện đầu tiên sau warm-up không phải là NEUTRAL.
         """
-        dev_struct = load_structure("2018-01-01", "2025-06-30", warmup_months=24, k=3)
-        self.assertGreater(len(dev_struct), 4000, "Tập Development 2018–2025 phải có trên 4000 sự kiện")
+        dev_struct = load_structure("2018-01-01", "2025-06-30", warmup_months=None, k=3)
+        self.assertEqual(len(dev_struct), 4486, "Tập Development 2018–2025 phải có đúng 4.486 sự kiện")
 
-        # Khẳng định 6 & 7: Triệt tiêu hoàn toàn trạng thái NEUTRAL nhân tạo
+        # Khẳng định 6 & 7: Triệt tiêu hoàn toàn trạng thái NEUTRAL nhân tạo, xác minh xu hướng mở đầu là BULLISH
         self.assertFalse(dev_struct["event_type"].str.contains("INIT_BREAK").any(), "Không được có sự kiện INIT_BREAK nào sau khi lọc warm-up")
         self.assertNotEqual(dev_struct.iloc[0]["prior_trend"], "NEUTRAL", "prior_trend của sự kiện đầu tiên sau warm-up không được là NEUTRAL")
+        self.assertEqual(dev_struct.iloc[0]["prior_trend"], "BULLISH", "Xu hướng mở đầu năm 2018 phải là BULLISH tự nhiên đã được kiểm chứng")
+        self.assertEqual(dev_struct.iloc[0]["event_type"], "BULLISH_BOS", "Sự kiện đầu tiên năm 2018 phải là BULLISH_BOS")
+        first_ev = dev_struct.iloc[0]
+        print(f"\n[VERIFIED] First event 2018: bar {first_ev['time_candle']} | {first_ev['event_type']} | broken {first_ev['price_broken']} | close {first_ev['close_price']} | prior={first_ev['prior_trend']}")
 
         # 1. Mỗi nến có tối đa 1 sự kiện
         self.assertFalse(dev_struct["time_candle"].duplicated().any(), "Tồn tại nến có hơn 1 sự kiện cấu trúc")
@@ -717,8 +739,8 @@ class TestStructureModule(unittest.TestCase):
         self.assertFalse(dev_struct["broken_swing_id"].duplicated().any(), "Tồn tại swing bị phá vỡ 2 lần")
 
         # 4. Zero Look-ahead: swing.time_available <= event.time_candle
-        # Nạp lại toàn bộ swings từ 2016-01 để đối chiếu time_available của swing
-        df_full = load_h1("2016-01-01", "2025-06-30")
+        # Nạp lại toàn bộ swings từ đầu DB (khớp với base nạp của load_structure mặc định) để đối chiếu
+        df_full = load_h1(None, "2025-06-30")
         swings = detect_swings(df_full, k=3)
         sw_map = swings.set_index("swing_id")["time_available"].to_dict()
 
