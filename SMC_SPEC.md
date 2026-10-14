@@ -14,14 +14,20 @@
 - **V2-8 (Quy tắc che khuất v2 - Max Rule):** Chuyển điều kiện xóa swing sang $\le \max(P, Close[t])$ (với High) và $\ge \min(P, Close[t])$ (với Low) để triệt tiêu BOS ma khi nến đóng vượt mức swing mới nhưng mức swing cũ cao hơn vẫn chưa bị phá.
 - **V2-9 (Chuẩn hóa Warm-up Period & Hàm load_structure mặc định toàn bộ lịch sử):** Kiểm chứng thực nghiệm chứng minh warm-up 24 tháng (nạp từ `2016-01-01`) hội tụ trùng khớp hoàn hảo 100% trên mọi thuộc tính sự kiện thị trường với toàn bộ lịch sử (từ `2014-06-01`) trên toàn bộ 4.486 sự kiện cấu trúc 2018–2025. Chuẩn hóa quy tắc mặc định nạp toàn bộ lịch sử trước $T_{\text{start}}$ (`warmup_months=None`), lọc sự kiện theo $time\_available \ge T_{\text{start}}$ (thay vì $time\_candle$) để bảo toàn nến 23:00 đóng cửa đúng 00:00 ngày bắt đầu, và ghi chú rõ `bar_index`, `structure_id` chỉ có ý nghĩa cục bộ.
 - **V2-10 (Đóng băng đặc tả FVG & Vòng đời v2.2):** Chuẩn hóa quy tắc khoảng trống cuối tuần & giờ nghỉ hàng ngày (`spans_gap`), bộ lọc tối thiểu $\gamma \cdot ATR(H1, 14)_{[i-1]}$ không look-ahead, vòng đời 3 sự kiện (`TESTED`, `INVALIDATED`, `EXPIRED`) với quy tắc ưu tiên nghiêm ngặt, chuẩn hóa $time\_available = close\_time[j]$ cho từng sự kiện vòng đời, và làm rõ điều kiện chuyển tiếp nến $i+M+1$ nếu chưa bị `INVALIDATED`.
-- **V2-11 (Đóng băng đặc tả Liquidity Pools & Chuẩn hóa vòng đời FVG v2.3):**
-  1. *Khớp thứ tự sự kiện vòng đời FVG:* Sắp xếp bảng `lifecycle_df` theo thứ tự ưu tiên cùng thời điểm `CREATED (0) -> TESTED (1) -> INVALIDATED (2) -> EXPIRED (3)`.
-  2. *Bảo toàn FVG warm-up còn sống:* `load_fvg` giữ nguyên mọi FVG chưa kết thúc trước `start_date` (bảo toàn 4 FVG cuối năm 2017 còn hiệu lực lúc mở phiên 2018).
-  3. *Bốn quyết định đóng băng cho `liquidity.py`:*
-     - **EQH/EQL:** Bắt buộc $Price_2 \le Price_1$ với EQH (và $Price_2 \ge Price_1$ với EQL) để ngăn swing 2 vi phạm pool 1 trước khi hấp thụ; mức giá pool luôn là $Price_1$.
-     - **Tuổi của pool:** Zero tham số mới cho Swing và EQH/EQL (tự khép kín bởi quy tắc "nến đầu tiên quyết định"); ghi nhận trường `pool_age` ở mỗi sự kiện sweep. PDH/PDL hết hiệu lực tại lần chốt ngày New York kế tiếp.
-     - **Mọi swing đã xác nhận đều là pool thanh khoản** ở mức thành phần (không tham số ẩn).
-     - **Biên vùng Á (Asian High/Low):** Hết hiệu lực tại lần chốt ngày New York cùng ngày (trước khi phiên Á kế tiếp hình thành biên mới).
+- **V2-11 (Đóng băng toàn diện đặc tả Liquidity Pools & Vòng đời FVG v2.3):**
+  1. *Khớp thứ tự sự kiện vòng đời FVG:* Sắp xếp bảng `lifecycle_df` theo thứ tự ưu tiên cùng thời điểm `CREATED (0) -> TESTED (1) -> INVALIDATED (2) -> EXPIRED (3)` khớp với code thực thi trong `fvg.py`.
+  2. *Bảo toàn FVG warm-up còn sống:* `load_fvg` giữ nguyên mọi FVG chưa kết thúc trước `start_date` (bảo toàn 4 FVG cuối năm 2017 còn hiệu lực lúc 00:00 ngày 01/01/2018).
+  3. *Chuẩn hóa toán học & Máy trạng thái cho EQH/EQL (Sửa lỗi mục 5.1):*
+     - Thay thế điều kiện kiểm tra giá đóng cửa cũ bằng điều kiện máy trạng thái: Pool của swing 1 phải còn đang ở trạng thái `ACTIVE` (chưa bị `SWEPT`, `BROKEN`, hay `EXPIRED`) tại thời điểm $\text{time\_available}(\text{swing}_2)$.
+     - Ràng buộc chiều giá bắt buộc: $Price_2 \le Price_1$ ($High_2 \le High_1$) cho EQH, và $Price_2 \ge Price_1$ ($Low_2 \ge Low_1$) cho EQL.
+     - Mức giá pool dứt khoát bằng $Price_1$ ($Price_{\text{EQH}} = Price_1$, $Price_{\text{EQL}} = Price_1$).
+     - Quy tắc hấp thụ: Khi EQH/EQL hình thành, hai swing cấu thành lập tức chuyển sang `ABSORBED` (vô hiệu hóa), pool EQH/EQL mới sinh ra có tuổi bắt đầu từ 0.
+  4. *Quy tắc Hạn tuổi thống nhất cho MỌI loại Pool ($M = 24$ nến):*
+     - Mọi loại pool (Swing High/Low, EQH/EQL, PDH/PDL, Asian High/Low) đều có hạn tuổi tối đa $M = 24$ nến H1 (PRIMARY) / 48 nến (EXPLORATORY) tính theo số hàng dữ liệu kể từ `time_available`.
+     - Loại bỏ các quy tắc hết hạn theo múi giờ riêng rẽ cho PDH/PDL và phiên Á, loại bỏ trạng thái swing sống vô tận; thống nhất chung tham số $M=24$ (zero tham số mới).
+     - *Khép kín trường hợp biên ($j_2 - j_1 = 24$):* Tại đúng nến thứ $M$, Pool 1 vẫn còn `ACTIVE` trong suốt cây nến để nhận diện vi phạm hoặc hấp thụ thành EQH/EQL; chỉ chuyển sang `EXPIRED` khi nến thứ $M$ đóng cửa mà không bị chạm hay hấp thụ.
+  5. *Mọi Swing đã xác nhận đều là Pool:* Ở tầng thành phần (`liquidity.py`), không áp bộ lọc cấu trúc vì `structure.py` chỉ lọc theo giá đóng cửa trong khi pool bị thanh lý bởi râu nến. Việc lọc sweep là trách nhiệm của bộ sinh tín hiệu (`signals.py`) và phải được đăng ký tiên nghiệm (pre-registered) trước khi chạy backtest, không điều chỉnh sau khi xem số đếm.
+  6. *Xử lý Nến ngoài (Outside Bar) vi phạm cả hai đầu:* Mỗi pool tự quyết định số phận độc lập theo mức giá của mình; cả hai sự kiện đều được phát ra tại $\text{close\_time}[t]$ nếu thỏa điều kiện.
 
 ---
 
@@ -141,7 +147,7 @@ Xét bộ 3 nến H1 liên tiếp tại chỉ số $[i-2, i-1, i]$:
   Điều kiện nghiêm ngặt: $High[i] < Low[i-2]$ (ca bằng nhau $High[i] = Low[i-2]$ tuyệt đối KHÔNG phải FVG).
   - **Mép gần (Near edge / Entry threshold):** $\text{bottom} = High[i]$. Khi giá quay đầu hồi quy tăng từ dưới lên, đây là mức giá đầu tiên chạm vào vùng gap.
   - **Mép xa (Far edge / Invalidation threshold):** $\text{top} = Low[i-2]$. Nếu giá đóng cửa vượt lên trên mép này, vùng mất cân bằng bị vô hiệu.
-- **Quyết định tiên nghiệm về khoảng trống cuối tuần & giờ nghỉ hàng ngày (Weekend/Holiday & Daily Maintenance Gap Decision - Spec v2.2):**
+- **Quyết định tiên nghiệm về khoảng trống cuối tuần & giờ nghỉ hàng ngày (Weekend/Holiday & Daily Maintenance Gap Decision - Spec v2.3):**
   - *Bản chất vi mô:* FVG đại diện cho sự mất cân bằng cung-cầu trong phiên đấu giá liên tục (continuous auction orderflow). Bước nhảy mở cửa qua 48h đóng sàn cuối tuần (auction reopening jump) hoặc qua 1 giờ nghỉ kỹ thuật hàng ngày (daily maintenance break, thường vào 21:00–22:00 hoặc 22:00–23:00 UTC theo quy ước của thị trường GOLD) không phải là sự mất cân bằng thanh khoản nội phiên.
   - *Quy tắc thuật toán:* Kiểm tra khoảng cách thời gian giữa 2 hàng liên tiếp trong bộ ba:
     $$\Delta t_1 = time\_utc[i-1] - time\_utc[i-2] \quad , \quad \Delta t_2 = time\_utc[i] - time\_utc[i-1]$$
@@ -198,52 +204,123 @@ Nhật ký vòng đời `lifecycle_df` theo dõi trạng thái bằng thuật to
 
 ## 5. Pool thanh khoản & Quét thanh khoản (Liquidity Pools & Sweeps) (`src/backtest/smc/liquidity.py`)
 
-### 5.1. Bốn nguồn Pool thanh khoản & Bốn quyết định thiết kế đóng băng (Spec v2.3)
+### 5.1. Bốn nguồn Pool thanh khoản & Các quyết định thiết kế đóng băng (Spec v2.3)
+
 1. **Swing High / Swing Low (Mọi swing xác nhận đều là Pool):**
-   - *Nguyên tắc zero tham số ẩn:* Ở tầng mô-đun thành phần (`liquidity.py`), mọi Swing High và Swing Low đã xác nhận ($\text{time\_available} \le t$) đều được coi là một pool thanh khoản độc lập (trừ các swing đã bị hấp thụ vào EQH/EQL).
-   - *Phân định ranh giới trách nhiệm:* Việc sàng lọc, loại bớt loại pool nào (ví dụ chỉ lấy swing của trend chính, hay chỉ lấy swing trong $N$ ngày) hoàn toàn thuộc về tầng thiết kế tín hiệu (signal strategy), và bắt buộc phải được đăng ký tiên nghiệm trong pre-registration trước khi chạy backtest xem P&L.
-   - *Vòng đời & Tuổi của Pool Swing:* Không áp đặt hạn tuổi nhân tạo (zero tham số mới). Vòng đời tự khép kín khi bị `SWEPT` hoặc `BROKEN`. Tại mỗi sự kiện sweep, hệ thống ghi nhận trường `pool_age` (số nến H1 hoặc số giờ từ khi pool khả dụng đến khi bị vi phạm) để phục vụ việc phân tích và thiết kế tín hiệu sau này.
-2. **Equal Highs / Equal Lows (EQH / EQL) & Ràng buộc Chiều giá Không vi phạm:**
-   - **Định nghĩa "lân cận" chính xác:** Hai Swing High (cho EQH) hoặc hai Swing Low (cho EQL) liên tiếp cùng loại thỏa mãn:
-     1. *Khoảng cách nến:* $j_2 - j_1 \le N_{\text{bars}}$ (PRIMARY: $N_{\text{bars}} = 24$ nến = 1 ngày giao dịch; EXPLORATORY: $48$ nến).
-     2. *Không bị vi phạm:* Không có nến nào nằm giữa $j_1$ và $j_2$ đóng cửa vượt lên trên đỉnh 1 (với EQH) hoặc xuyên dưới đáy 1 (với EQL).
+   - *Nguyên tắc zero tham số ẩn:* Ở tầng mô-đun thành phần (`liquidity.py`), mọi Swing High và Swing Low đã xác nhận ($\text{time\_available} \le t$) đều sinh ra một pool thanh khoản độc lập:
+     - Swing High tạo ra **Buy-side Liquidity Pool** tại mức giá $Price = High$.
+     - Swing Low tạo ra **Sell-side Liquidity Pool** tại mức giá $Price = Low$.
+     *(Ngoại lệ duy nhất: Các swing đã bị hấp thụ vào cụm EQH/EQL).*
+   - *Lý chứng không lọc theo cấu trúc:* Trong `structure.py`, danh sách `unbroken_highs/lows` chỉ được cập nhật và loại bỏ swing khi mức được bảo vệ bị phá vỡ bằng **giá đóng cửa** ($Close[t] > P$ hoặc $Close[t] < P$), trong khi pool thanh khoản bị thanh lý/quét bởi **râu nến** ($High[t] > P$ hoặc $Low[t] < P$). Một swing bị quét bằng râu vẫn nằm trong danh sách `unbroken_highs` của cấu trúc dù pool thanh khoản của nó đã chết. Do đó, việc cố gắng lọc pool theo cấu trúc là bất khả thi và mâu thuẫn khái niệm.
+   - *Phân định ranh giới trách nhiệm:* Tầng `liquidity.py` phát hiện toàn bộ mọi pool và sự kiện quét thanh khoản khách quan. Việc sàng lọc sweep nào có ý nghĩa giao dịch (ví dụ: sweep thuận xu hướng cấu trúc, sweep kích hoạt CHoCH cùng chiều, sweep hợp lưu với FVG,...) hoàn toàn thuộc về tầng chiến lược / bộ sinh tín hiệu (`signals.py`). Toàn bộ tập quy tắc lọc này **BẮT BUỘC PHẢI ĐƯỢC ĐĂNG KÝ TIÊN NGHIỆM (Pre-registered)** trước khi backtest P&L, tuyệt đối không được điều chỉnh sau khi nhìn thấy số đếm thực nghiệm.
+   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** (PRIMARY) kể từ `time_available` nếu chưa bị `SWEPT` hoặc `BROKEN`.
+
+2. **Equal Highs / Equal Lows (EQH / EQL) & Cơ chế Hấp thụ dựa trên Máy trạng thái:**
+   - **Định nghĩa "lân cận" chính xác:** Hai Swing High (cho EQH) hoặc hai Swing Low (cho EQL) liên tiếp cùng loại thỏa mãn 3 điều kiện:
+     1. *Khoảng cách nến:* $j_2 - j_1 \le M$ (PRIMARY: $M = 24$ nến = 1 ngày giao dịch; EXPLORATORY: $48$ nến).
+     2. *Pool 1 còn ACTIVE (Sửa lỗi spec mục 5.1):*  
+        Pool thanh khoản của swing 1 **BẮT BUỘC VẪN CÒN ĐANG Ở TRẠNG THÁI ACTIVE** (chưa bị `SWEPT`, `BROKEN`, hay `EXPIRED`) tại thời điểm $\text{time\_available}(\text{swing}_2)$.  
+        *Lý chứng vi mô dứt khoát:* Để chính máy trạng thái của Pool 1 quyết định tính hợp lệ thay vì dùng điều kiện kiểm tra giá đóng cửa riêng biệt. Nếu có bất kỳ cây nến nào nằm giữa $j_1$ và $\text{time\_available}(\text{swing}_2)$ có râu nến vượt đỉnh 1 (hoặc xuyên dưới đáy 1), Pool 1 đã lập tức bị `SWEPT` ở nến đó; hoặc nếu nến đóng cửa vượt đỉnh 1, Pool 1 đã bị `BROKEN`. Một pool swing 1 đã "chết" thì không thể tích tụ thanh khoản để tạo EQH với swing 2.
      3. *Biên độ giá bằng nhau:* $|Price_1 - Price_2| \le \varepsilon \times ATR(H1, 14)_{[j_2]}$ (PRIMARY: $\varepsilon = 0,08$; EXPLORATORY: $\varepsilon = 0,05$).
-     4. *Ràng buộc chiều giá bắt buộc (Decision 1):*
+     4. *Ràng buộc chiều giá bắt buộc:*
         - **Đối với EQH:** Bắt buộc **$Price_2 \le Price_1$** ($High_2 \le High_1$).  
-          *Lý chứng vi mô:* Nếu $Price_2 > Price_1$, cây nến tạo swing 2 đã có đỉnh $High \ge Price_2 > Price_1$. Nghĩa là nến này đã chạm/vượt pool của swing 1, khiến pool 1 đã bị `SWEPT` hoặc `BROKEN` ngay từ lúc đó, không còn pool 1 tồn tại để hấp thụ.
+          *Lý chứng vi mô:* Nếu $Price_2 > Price_1$, cây nến tạo swing 2 đã có $High \ge Price_2 > Price_1$, tức râu nến swing 2 đã quét qua đỉnh 1, khiến Pool 1 bị vi phạm trước khi swing 2 được xác nhận.
         - **Đối với EQL:** Bắt buộc **$Price_2 \ge Price_1$** ($Low_2 \ge Low_1$).  
-          *Lý chứng vi mô:* Nếu $Price_2 < Price_1$, cây nến tạo swing 2 đã có đáy $Low \le Price_2 < Price_1$, khiến pool 1 đã bị vi phạm trước đó.
-   - **Mức giá của Pool:** Do ràng buộc chiều giá trên, mức giá của Pool luôn được xác định dứt khoát:
+          *Lý chứng vi mô:* Nếu $Price_2 < Price_1$, cây nến tạo swing 2 đã có $Low \le Price_2 < Price_1$, khiến Pool 1 bị vi phạm trước đó.
+   - **Mức giá của Pool:** Do ràng buộc chiều giá trên, mức giá của Pool luôn được xác định duy nhất:
      - $Price_{\text{EQH}} = Price_1$ (bằng $High_1$, vì $High_2 \le High_1$).
      - $Price_{\text{EQL}} = Price_1$ (bằng $Low_1$, vì $Low_2 \ge Low_1$).
-   - **Thời điểm khả dụng:** $\text{time\_available} = \text{time\_available}(\text{swing}_2)$.
+   - **Thời điểm khả dụng:** $\text{time\_available} = \text{time\_available}(\text{swing}_2) = \text{close\_time}[j_2 + k]$.
    - **Quy tắc Hấp thụ (Absorption Rule - BẮT BUỘC):**  
-     Khi Pool EQH (hoặc EQL) được kích hoạt tại $\text{time\_available}(\text{swing}_2)$, hai mức Swing đơn lẻ cấu thành ($\text{swing}_1$ và $\text{swing}_2$) **LẬP TỨC BỊ HẤP THỤ VÀ VÔ HIỆU HÓA (Absorbed / Deactivated)**. Hệ thống chỉ theo dõi duy nhất mức giá của Pool EQH/EQL, loại bỏ hoàn toàn nguy cơ một cú sweep bị đếm lặp 2–3 lần.
-   - *Vòng đời EQH/EQL:* Không áp đặt hạn tuổi nhân tạo (zero tham số mới), tự khép kín khi bị `SWEPT` hoặc `BROKEN`. Ghi nhận `pool_age` tại thời điểm sweep.
+     Khi Pool EQH (hoặc EQL) được kích hoạt tại $\text{time\_available}(\text{swing}_2)$, hai mức Swing đơn lẻ cấu thành ($\text{swing}_1$ và $\text{swing}_2$) **LẬP TỨC CHUYỂN SANG TRẠNG THÁI `ABSORBED` VÀ VÔ HIỆU HÓA**. Hệ thống chỉ theo dõi duy nhất mức giá của Pool EQH/EQL, loại bỏ hoàn toàn nguy cơ một cú sweep bị đếm lặp 2–3 lần.
+   - *Vòng đời & Hạn tuổi:* Pool EQH/EQL có tuổi bắt đầu từ 0 tại $\text{time\_available}(\text{swing}_2)$, sống tối đa $M = 24$ nến tiếp theo, tự khép kín khi bị `SWEPT`, `BROKEN`, hoặc `EXPIRED`.
+
 3. **Đỉnh/Đáy ngày hôm trước (Previous Day High/Low - PDH/PDL):**
    - **Quy chuẩn cắt ngày theo giờ New York (`America/New_York`):**
      Sử dụng mốc đóng cửa thị trường New York lúc **17:00 NY** làm thời điểm chốt ngày giao dịch (xử lý giờ mùa hè DST tự động bằng `zoneinfo`):
      - Mùa đông (EST, UTC-5): 17:00 NY tương ứng **22:00 UTC** (nến H1 đóng lúc 22:00 UTC).
      - Mùa hè (EDT, UTC-4): 17:00 NY tương ứng **21:00 UTC** (nến H1 đóng lúc 21:00 UTC).
    - *Thời điểm khả dụng:* PDH và PDL khả dụng ngay khi nến H1 cuối ngày đóng cửa (21:00 UTC mùa hè, 22:00 UTC mùa đông).
-   - *Vòng đời PDH/PDL (Decision 2):* PDH/PDL **HẾT HIỆU LỰC (`EXPIRED`)** tại lần chốt ngày New York kế tiếp (24h sau), vì bộ PDH/PDL của ngày mới sẽ sinh ra để thay thế nó.
+   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** kể từ `time_available`. Vì một ngày giao dịch có khoảng 23–24 nến H1 (có 1 giờ nghỉ kỹ thuật), PDH/PDL tự nhiên hết hiệu lực sau 24 hàng dữ liệu đúng lúc bộ PDH/PDL của ngày mới ra đời để thay thế, không cần quy tắc timezone riêng cho expiry và không bị lệch qua cuối tuần vì đếm theo hàng dữ liệu.
+
 4. **Biên vùng Á (Asian High / Asian Low):**
    - *Phiên Á:* 00:00 – 07:00 UTC.
    - *Thời điểm khả dụng:* Khả dụng từ **07:00 UTC** (ngay khi nến H1 06:00 UTC đóng lúc 07:00 UTC).
-   - *Vòng đời Biên vùng Á (Decision 4):* Asian High/Low **HẾT HIỆU LỰC (`EXPIRED`)** tại mốc chốt ngày New York cùng ngày (17:00 NY, tức 21:00 UTC mùa hè hoặc 22:00 UTC mùa đông), trước khi phiên Á kế tiếp hình thành biên mới.
+   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** kể từ `time_available` (từ 07:00 UTC hôm nay đến 07:00 UTC hôm sau, tự nhiên nhường chỗ cho phiên Á kế tiếp mà không cần thêm tham số).
 
-### 5.2. Định nghĩa Quét thanh khoản & Quy tắc "Nến đầu tiên quyết định số phận của Pool"
-Nến đầu tiên $t$ có giá vi phạm mức của Pool ($High[t] > \text{Pool}_{\text{High}}$ hoặc $Low[t] < \text{Pool}_{\text{Low}}$) sẽ **QUYẾT ĐỊNH DỨT ĐIỂM SỐ PHẬN CỦA POOL**:
+---
+
+### 5.2. Máy trạng thái vòng đời Pool & Định nghĩa Quét thanh khoản (Liquidity Sweeps)
+
+Vòng đời của mọi Pool thanh khoản là một **máy trạng thái hữu hạn (Finite State Machine)** với 5 trạng thái:
+$$\mathbf{ACTIVE} \longrightarrow \mathbf{SWEPT} \; / \; \mathbf{BROKEN} \; / \; \mathbf{EXPIRED} \; / \; \mathbf{ABSORBED}$$
+
+Nến đầu tiên $t$ ($t \ge bar\_index_{\text{avail}} + 1$) vi phạm mức của Pool sẽ **QUYẾT ĐỊNH DỨT ĐIỂM SỐ PHẬN CỦA POOL**:
 - **Trường hợp 1 — Quét thanh khoản (Liquidity Sweep):**
-  - High Sweep: $High[t] > \text{Pool}_{\text{High}}$ VÀ $Close[t] \le \text{Pool}_{\text{High}}$.
-  - Low Sweep: $Low[t] < \text{Pool}_{\text{Low}}$ VÀ $Close[t] \ge \text{Pool}_{\text{Low}}$.
-  - Phát ra sự kiện Sweep tại $\text{time\_available} = \text{close\_time}[t]$, ghi nhận thuộc tính `pool_age = bar_index[t] - pool.bar_index`.
+  - High Sweep: $High[t] > \text{Pool}_{\text{Price}}$ VÀ $Close[t] \le \text{Pool}_{\text{Price}}$.
+  - Low Sweep: $Low[t] < \text{Pool}_{\text{Price}}$ VÀ $Close[t] \ge \text{Pool}_{\text{Price}}$.
+  - Phát ra sự kiện Sweep tại $\text{time\_available} = \text{close\_time}[t]$, ghi nhận thuộc tính `pool_age = bar_index[t] - pool.bar_index_avail`.
   - Pool lập tức chuyển sang trạng thái `SWEPT` và **HẾT HIỆU LỰC (Inactive)** vĩnh viễn.
 - **Trường hợp 2 — Phá vỡ (Breakout):**
-  - High Breakout: $Close[t] > \text{Pool}_{\text{High}}$.
-  - Low Breakout: $Close[t] < \text{Pool}_{\text{Low}}$.
+  - High Breakout: $Close[t] > \text{Pool}_{\text{Price}}$.
+  - Low Breakout: $Close[t] < \text{Pool}_{\text{Price}}$.
+  - Phát ra sự kiện Breakout tại $\text{time\_available} = \text{close\_time}[t]$, ghi nhận thuộc tính `pool_age`.
   - Pool lập tức chuyển sang trạng thái `BROKEN` và **HẾT HIỆU LỰC (Inactive)** vĩnh viễn.
-- **Hệ quả cốt lõi:** Dù là `SWEPT`, `BROKEN` hay `EXPIRED`, pool thanh khoản đó không bao giờ được phép sinh thêm bất kỳ sự kiện sweep nào sau này.
+- **Trường hợp 3 — Hết hạn (Expiration):**
+  - Khi $t - bar\_index_{\text{avail}} \ge M$ mà pool chưa bị vi phạm (`SWEPT`/`BROKEN`) và chưa bị hấp thụ (`ABSORBED`).
+  - **Quy tắc khép kín trường hợp biên ($t - bar\_index_{\text{avail}} = M = 24$):**
+    * Tại đúng nến thứ $M$ (nến có chỉ số $bar\_index_{\text{avail}} + M$), Pool **VẪN CÒN ĐANG Ở TRẠNG THÁI ACTIVE** trong suốt cây nến đó!
+    * Nếu nến thứ $M$ có giá vi phạm pool $\implies$ Ghi nhận `SWEPT` hoặc `BROKEN`.
+    * Nếu nến thứ $M$ là nến xác nhận của Swing 2 ($j_2 - j_1 = M = 24$) thỏa mãn các điều kiện EQH/EQL $\implies$ Pool 1 vẫn còn ACTIVE để được hấp thụ thành EQH/EQL!
+    * Chỉ khi nến thứ $M$ đóng cửa mà pool KHÔNG bị vi phạm và KHÔNG bị hấp thụ, pool mới chuyển sang trạng thái `EXPIRED` tại $\text{close\_time}[bar\_index_{\text{avail}} + M]$.
+- **Trường hợp 4 — Bị hấp thụ (Absorption - chỉ dành cho Swing đơn lẻ cấu thành EQH/EQL):**
+  - Khi EQH/EQL được kích hoạt, Swing 1 và Swing 2 chuyển sang trạng thái `ABSORBED` tại $\text{time\_available}(\text{swing}_2)$.
+- **Hệ quả cốt lõi:** Dù là `SWEPT`, `BROKEN`, `EXPIRED` hay `ABSORBED`, pool thanh khoản đó không bao giờ được phép sinh thêm bất kỳ sự kiện nào sau này.
+
+#### Xử lý Nến ngoài (Outside Bar) vi phạm cả Pool Đỉnh và Pool Đáy cùng lúc
+Nếu một cây nến $t$ có râu hoặc thân vượt cả mức của một Pool High đang active ($High[t] > Pool_{\text{High}}$) VÀ mức của một Pool Low đang active ($Low[t] < Pool_{\text{Low}}$):
+- **Nguyên tắc phân xử:** Mỗi pool tự định đoạt số phận độc lập dựa trên mức giá của chính nó và giá đóng cửa $Close[t]$ của nến $t$.
+- **Hành vi cụ thể:**
+  - Nếu nến ngoài quét cả 2 pool nhưng đóng cửa nằm giữa 2 mức ($Pool_{\text{Low}} \le Close[t] \le Pool_{\text{High}}$):
+    * Pool High phát ra sự kiện `SWEEP` đỉnh, chuyển sang `SWEPT`.
+    * Pool Low phát ra sự kiện `SWEEP` đáy, chuyển sang `SWEPT`.
+  - Nếu nến ngoài đóng cửa vượt hẳn một phía (ví dụ $Close[t] > Pool_{\text{High}}$):
+    * Pool High phát ra sự kiện `BROKEN` đỉnh, chuyển sang `BROKEN`.
+    * Pool Low phát ra sự kiện `SWEEP` đáy (nếu $Low[t] < Pool_{\text{Low}}$), chuyển sang `SWEPT`.
+- Cả hai sự kiện đều phát ra tại cùng $\text{time\_available} = \text{close\_time}[t]$, được lưu độc lập trong bảng sự kiện quét thanh khoản, sắp xếp ổn định theo `time_available` $\rightarrow$ `pool_id`.
+
+#### Cảnh báo định lượng về số lượng Sweep & Ranh giới trách nhiệm
+- Với tần suất ~1.140 swing/năm trên dữ liệu vàng H1 ($k=3$), tổng số sự kiện sweep thô có thể lên tới hàng nghìn sự kiện mỗi năm.
+- **Phân định dứt khoát:** Tầng `liquidity.py` chịu trách nhiệm xuất ra đầy đủ, trung thực toàn bộ các sự kiện Sweep diễn ra trên thị trường mà không áp đặt bất kỳ bộ lọc thiên kiến nào.
+- Việc lựa chọn sweep nào để sinh tín hiệu vào lệnh (ví dụ: chỉ chọn sweep thuận xu hướng cấu trúc đang có, hoặc sweep có nến đóng tạo CHoCH kích hoạt, kết hợp kiểm tra FVG) là trách nhiệm của tầng sinh tín hiệu (`signals.py`). Mọi tiêu chí lọc này **phải được ghi nhận trong văn bản đăng ký tiên nghiệm (pre-registration)** trước khi chạy backtest P&L, nghiêm cấm điều chỉnh bộ lọc sau khi quan sát số lượng sweep thực tế.
+
+---
+
+### 5.3. Bảng đầu ra & Schema dữ liệu chuẩn hóa của `liquidity.py`
+
+Mô-đun `liquidity.py` xuất ra 2 bảng dữ liệu chuẩn hóa:
+
+1. **Bảng Pools (`pools_df`):**
+   - `pool_id`: int (định danh duy nhất tăng dần từ 0)
+   - `pool_type`: str (`'SWING_HIGH'`, `'SWING_LOW'`, `'EQH'`, `'EQL'`, `'PDH'`, `'PDL'`, `'ASIAN_HIGH'`, `'ASIAN_LOW'`)
+   - `price`: float (mức giá kích hoạt của pool)
+   - `bar_index_candle`: int (chỉ số nến tạo đỉnh/đáy/phiên)
+   - `bar_index_avail`: int (chỉ số nến chốt khả dụng)
+   - `time_candle`: pd.Timestamp (giờ mở nến tạo đỉnh/đáy/phiên)
+   - `time_available`: pd.Timestamp (thời điểm pool bắt đầu có hiệu lực)
+   - `source_id`: object (định danh nguồn: `swing_id` hoặc `(swing_id1, swing_id2)`, hoặc chuỗi ngày)
+
+2. **Bảng Nhật ký Vòng đời & Quét thanh khoản (`sweeps_df` hoặc `lifecycle_df`):**
+   - `lifecycle_id`: int (định danh sự kiện tăng dần từ 0)
+   - `pool_id`: int (liên kết khóa ngoại tới `pools_df`)
+   - `pool_type`: str (loại pool tương ứng)
+   - `event_type`: str (`'SWEPT'`, `'BROKEN'`, `'EXPIRED'`, `'ABSORBED'`)
+   - `bar_index`: int (chỉ số nến $t$ phát sinh sự kiện)
+   - `time_candle`: pd.Timestamp (giờ mở nến $t$)
+   - `time_available`: pd.Timestamp (thời điểm khả dụng sự kiện: $\text{close\_time}[t]$)
+   - `price_trigger`: float ($High[t]$ cho High Sweep/Break, $Low[t]$ cho Low Sweep/Break, hoặc np.nan cho Expired/Absorbed)
+   - `pool_age`: int (số nến từ khi pool khả dụng đến khi vi phạm: $bar\_index[t] - pool.bar\_index\_avail$)
+   - `close_price`: float (giá đóng cửa của nến $t$)
 
 ---
 
@@ -278,9 +355,9 @@ $$\text{cost\_R} = \frac{\text{friction}_{\text{year}}}{R_{dist}} \le 0,08 \impl
 | :---: | :--- | :--- | :---: | :---: |
 | $k$ | Swing Window | Số nến lân cận mỗi bên phát hiện Swing | **3** | 5 |
 | $\gamma$ | FVG Min Size | Kích thước tối thiểu FVG theo $ATR(H1, 14)_{[i-1]}$ | **0,15** | 0,25 |
-| $M$ | FVG Lifespan | Số nến tồn tại tối đa của FVG trước khi hết hạn | **24** | 48 |
+| $M$ | FVG & Pool Lifespan | Số nến tồn tại tối đa của FVG và mọi loại Pool thanh khoản | **24** | 48 |
 | $\varepsilon$ | EQH Tolerance | Dung sai chênh lệch giá EQH/EQL theo ATR | **0,08** | 0,05 |
-| $N_{\text{bars}}$ | EQH Distance | Khoảng cách nến tối đa giữa 2 đỉnh/đáy EQH | **24** | 48 |
+| $N_{\text{bars}}$ | EQH Distance | Khoảng cách nến tối đa giữa 2 đỉnh/đáy EQH ($N_{\text{bars}} = M$) | **24** | 48 |
 | $\alpha_{ATR}$ | ATR Floor Mult | Hệ số chặn dưới khoảng cách SL theo ATR H1 | **0,50** | 0,75 |
 | $C_{\text{mult}}$ | Cost Multiplier | Hệ số khoảng cách SL tối thiểu theo phí ma sát | **12,5** (chi phí $\le 0,08$R) | 10,0 (chi phí $\le 0,10$R) |
 
