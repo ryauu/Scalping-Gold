@@ -1,12 +1,14 @@
 """Mô-đun swings.py - Phát hiện Swing High và Swing Low chuẩn SMC.
 
 Định nghĩa toán học (theo SMC_SPEC.md mục 2):
-- Với chuỗi nến và tham số k (mặc định k=3):
+- Với chuỗi nến và tham số k (PRIMARY: k=3, EXPLORATORY: k=5):
   * Swing High tại nến i: High[i] > High[i-j] và High[i] > High[i+j] với mọi j in [1, k] (lớn hơn nghiêm ngặt).
   * Swing Low tại nến i: Low[i] < Low[i-j] và Low[i] < Low[i+j] với mọi j in [1, k] (nhỏ hơn nghiêm ngặt).
+- Các ca hòa (đỉnh/đáy bằng nhau trong cửa sổ k) bị loại bỏ hoàn toàn, không tạo swing đơn lẻ.
+- Bảo vệ NaN: Dữ liệu đầu vào tuyệt đối không được chứa NaN để tránh lỗi so sánh <= NaN trả về False.
 - Quy tắc time_available:
   * Nến i là đỉnh/đáy, nhưng chỉ được xác nhận khi nến (i+k) ĐÓNG CỬA.
-  * Với nến H1 nhãn thời gian time_utc (giờ mở nến), thời điểm đóng cửa là time_utc[i+k] + 1 hour.
+  * Với nến H1 nhãn thời gian time_utc (giờ mở nến), thời điểm đóng cửa là time_utc[i+k] + bar_duration.
   * Mọi thuật toán tại thời điểm t chỉ được truy cập các swing có time_available <= t.
 """
 
@@ -33,7 +35,7 @@ def detect_swings(
 
     Tham số:
         df: DataFrame chứa các cột 'time_utc', 'high', 'low' (nến đã sắp xếp theo thời gian).
-        k: Số nến lân cận mỗi bên cần vượt qua nghiêm ngặt (mặc định k=3).
+        k: Số nến lân cận mỗi bên cần vượt qua nghiêm ngặt (PRIMARY: k=3, EXPLORATORY: k=5).
         bar_duration: Độ dài nến để tính thời điểm đóng nến i+k (mặc định 1 giờ đối với H1).
 
     Trả về:
@@ -62,11 +64,20 @@ def detect_swings(
     if not {"time_utc", "high", "low"}.issubset(df.columns):
         raise KeyError("DataFrame đầu vào cần có đủ các cột: 'time_utc', 'high', 'low'")
 
+    # Bảo vệ chống NaN: Tuyệt đối không chấp nhận NaN để tránh so sánh <= NaN ra False
+    if df["time_utc"].isna().any():
+        raise ValueError("Cột 'time_utc' chứa giá trị NaN/NaT.")
+    if df["high"].isna().any() or df["low"].isna().any():
+        raise ValueError("Cột 'high' hoặc 'low' chứa giá trị NaN.")
+
     # Đảm bảo nến được sắp xếp tăng dần theo thời gian
     sorted_df = df.sort_values("time_utc").reset_index(drop=True)
     times = pd.to_datetime(sorted_df["time_utc"]).to_numpy()
     highs = sorted_df["high"].to_numpy(dtype=np.float64)
     lows = sorted_df["low"].to_numpy(dtype=np.float64)
+
+    assert not np.isnan(highs).any(), "Mảng highs không được chứa NaN"
+    assert not np.isnan(lows).any(), "Mảng lows không được chứa NaN"
 
     n = len(sorted_df)
     records: list[dict[str, object]] = []
