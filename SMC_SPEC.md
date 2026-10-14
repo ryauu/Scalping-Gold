@@ -35,6 +35,7 @@
 - **Khung thời gian cấu trúc chính:** **H1** (nến 1 giờ UTC). Được tổng hợp từ dữ liệu M1 sạch trong `data/meta.duckdb` (view `h1_utc`), kèm chỉ báo biến động $ATR(H1, 14)$ tính theo chuẩn Wilder không look-ahead.
 - **Quy ước nhãn thời gian H1:** Nhãn `time_utc` của nến H1 là giờ **MỞ** nến theo chuẩn UTC naive (ví dụ `08:00:00` là nến chạy từ `08:00:00` đến `08:59:59`).
 - **Thời điểm đóng nến H1:** `close_time = open_time + 1 hour` (nến nhãn `08:00:00` đóng cửa hoàn chỉnh lúc `09:00:00`).
+- **Ý nghĩa cột `bar_index` & Quy chuẩn ghép nối dữ liệu:** Cột `bar_index` trong mọi bảng đầu ra (`swings_df`, `fvg_df`, `pools_df`, `lifecycle_df`) chỉ mang ý nghĩa **chỉ mục vị trí hàng cục bộ (local 0-based row index)** của DataFrame nến H1 được truyền vào hàm tại lần thực thi đó (không phải khóa chính toàn cục). Mọi thao tác ghép nối (join/merge), đối chiếu sự kiện giữa các bảng hoặc qua các mô-đun phân tích BẮT BUỘC phải thực hiện theo cột thời gian chuẩn **`time_candle`** (hoặc `time_available`), tuyệt đối không ghép theo `bar_index` giữa các DataFrame khác nhau, và luôn kèm `assert` khẳng định không có `NaN` sau khi ánh xạ.
 
 ---
 
@@ -241,7 +242,7 @@ Nhật ký vòng đời `lifecycle_df` theo dõi trạng thái bằng thuật to
      - Mùa đông (EST, UTC-5): 17:00 NY tương ứng **22:00 UTC** (nến H1 đóng lúc 22:00 UTC).
      - Mùa hè (EDT, UTC-4): 17:00 NY tương ứng **21:00 UTC** (nến H1 đóng lúc 21:00 UTC).
    - *Thời điểm khả dụng:* PDH và PDL khả dụng ngay khi nến H1 cuối ngày đóng cửa (21:00 UTC mùa hè, 22:00 UTC mùa đông).
-   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** kể từ `time_available`. Vì một ngày giao dịch có khoảng 23–24 nến H1 (có 1 giờ nghỉ kỹ thuật), PDH/PDL tự nhiên hết hiệu lực sau 24 hàng dữ liệu đúng lúc bộ PDH/PDL của ngày mới ra đời để thay thế, không cần quy tắc timezone riêng cho expiry và không bị lệch qua cuối tuần vì đếm theo hàng dữ liệu.
+   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** kể từ `time_available` (hoặc khi bộ PDH/PDL của ngày giao dịch mới bắt đầu có hiệu lực tại lần chốt ngày New York kế tiếp, tùy điều kiện nào đến trước). Vì một ngày giao dịch thông thường có 23–24 nến H1 (có 1 giờ nghỉ kỹ thuật), quy tắc $M = 24$ hàng dữ liệu bảo đảm PDH/PDL tự nhiên nhường chỗ cho ngày mới mà không cần quy tắc múi giờ riêng cho việc hết hạn và không bị kéo dài lệch qua cuối tuần.
 
 4. **Biên vùng Á (Asian High / Asian Low):**
    - *Phiên Á:* 00:00 – 07:00 UTC.
@@ -308,7 +309,7 @@ Mô-đun `liquidity.py` xuất ra 2 bảng dữ liệu chuẩn hóa:
    - `bar_index_avail`: int (chỉ số nến chốt khả dụng)
    - `time_candle`: pd.Timestamp (giờ mở nến tạo đỉnh/đáy/phiên)
    - `time_available`: pd.Timestamp (thời điểm pool bắt đầu có hiệu lực)
-   - `source_id`: object (định danh nguồn: `swing_id` hoặc `(swing_id1, swing_id2)`, hoặc chuỗi ngày)
+   - `source_id`: str (chuỗi định danh nguồn chuẩn hóa: ví dụ `"swing_12"`, `"eqh_10_11"`, `"pdh_2024-01-15"`, `"asia_2024-01-15"`, đảm bảo an toàn kiểu dữ liệu và nhất quán lưu trữ)
 
 2. **Bảng Nhật ký Vòng đời & Quét thanh khoản (`sweeps_df` hoặc `lifecycle_df`):**
    - `lifecycle_id`: int (định danh sự kiện tăng dần từ 0)
@@ -355,9 +356,8 @@ $$\text{cost\_R} = \frac{\text{friction}_{\text{year}}}{R_{dist}} \le 0,08 \impl
 | :---: | :--- | :--- | :---: | :---: |
 | $k$ | Swing Window | Số nến lân cận mỗi bên phát hiện Swing | **3** | 5 |
 | $\gamma$ | FVG Min Size | Kích thước tối thiểu FVG theo $ATR(H1, 14)_{[i-1]}$ | **0,15** | 0,25 |
-| $M$ | FVG & Pool Lifespan | Số nến tồn tại tối đa của FVG và mọi loại Pool thanh khoản | **24** | 48 |
+| $M$ | FVG & Pool Lifespan / EQH Window | Số nến tồn tại tối đa của FVG, mọi Pool, và khoảng cách tối đa 2 đỉnh/đáy EQH ($j_2 - j_1 \le M$) | **24** | 48 |
 | $\varepsilon$ | EQH Tolerance | Dung sai chênh lệch giá EQH/EQL theo ATR | **0,08** | 0,05 |
-| $N_{\text{bars}}$ | EQH Distance | Khoảng cách nến tối đa giữa 2 đỉnh/đáy EQH ($N_{\text{bars}} = M$) | **24** | 48 |
 | $\alpha_{ATR}$ | ATR Floor Mult | Hệ số chặn dưới khoảng cách SL theo ATR H1 | **0,50** | 0,75 |
 | $C_{\text{mult}}$ | Cost Multiplier | Hệ số khoảng cách SL tối thiểu theo phí ma sát | **12,5** (chi phí $\le 0,08$R) | 10,0 (chi phí $\le 0,10$R) |
 
