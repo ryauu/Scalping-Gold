@@ -1,18 +1,24 @@
 """Mô-đun structure.py - Phát hiện Cấu trúc thị trường SMC (BOS & CHoCH).
 
-Định nghĩa toán học và quy tắc vận hành (theo SMC_SPEC.md mục 3):
+Định nghĩa toán học và quy tắc vận hành (theo SMC_SPEC.md v2 mục 3):
 1. Trạng thái cấu trúc thị trường (Market Trend State):
    - 'NEUTRAL': Trạng thái khởi tạo ban đầu khi chưa ghi nhận bất kỳ sự kiện phá vỡ nào.
-   - 'BULLISH': Cấu trúc tăng giá (sau khi có Bullish BOS hoặc Bullish CHoCH).
-   - 'BEARISH': Cấu trúc giảm giá (sau khi có Bearish BOS hoặc Bearish CHoCH).
+   - 'BULLISH': Cấu trúc tăng giá (sau khi có Bullish Init Break, Bullish BOS hoặc Bullish CHoCH).
+   - 'BEARISH': Cấu trúc giảm giá (sau khi có Bearish Init Break, Bearish BOS hoặc Bearish CHoCH).
 
 2. Mức đỉnh/đáy được bảo vệ (Protected Level - 0 bậc tự do):
-   - Protected High: Swing High chưa bị phá gần nhất (last unbroken Swing High) có time_available <= open_time[t].
-   - Protected Low: Swing Low chưa bị phá gần nhất (last unbroken Swing Low) có time_available <= open_time[t].
+   - Protected High: Swing High chưa bị phá gần nhất (last unbroken Swing High theo thời gian time_available,
+     hòa thì lấy bar_index lớn hơn) có time_available <= open_time[t].
+   - Protected Low: Swing Low chưa bị phá gần nhất (last unbroken Swing Low theo thời gian time_available,
+     hòa thì lấy bar_index lớn hơn) có time_available <= open_time[t].
 
-3. Phân định rạch ròi giữa BOS và CHoCH:
-   - BOS: Phá vỡ CÙNG CHIỀU với xu hướng hiện tại (hoặc xác lập xu hướng đầu tiên từ NEUTRAL).
-   - CHoCH: Phá vỡ NGƯỢC CHIỀU với xu hướng hiện tại (lật trạng thái xu hướng).
+3. Phân định rạch ròi giữa INIT_BREAK, BOS và CHoCH:
+   - INIT_BREAK: Phá vỡ mức swing đầu tiên từ trạng thái NEUTRAL ('BULLISH_INIT_BREAK' / 'BEARISH_INIT_BREAK').
+     Chỉ dùng xác lập xu hướng ban đầu, TUYỆT ĐỐI KHÔNG dùng làm tín hiệu giao dịch tiếp diễn.
+   - BOS: Phá vỡ CÙNG CHIỀU với xu hướng đã xác lập ('BULLISH_BOS' khi đang BULLISH phá đỉnh,
+     'BEARISH_BOS' khi đang BEARISH phá đáy). Tín hiệu tiếp diễn xu hướng.
+   - CHoCH: Phá vỡ NGƯỢC CHIỀU với xu hướng đã xác lập ('BEARISH_CHOCH' khi đang BULLISH phá đáy,
+     'BULLISH_CHOCH' khi đang BEARISH phá đỉnh). Lập tức đảo chiều trạng thái xu hướng.
 
 4. Quy tắc "Chỉ phá một lần" (First Break Only) & Xóa bỏ Swing bị che khuất (Shadowed Swings):
    - Khi một Swing High bị phá (Close[t] > P): Mức đó và MỌI Swing High chưa bị phá có giá <= max(P, Close[t])
@@ -26,15 +32,10 @@
 
 from __future__ import annotations
 
-import logging
-from typing import Sequence
-
 import numpy as np
 import pandas as pd
 
 from .swings import DEFAULT_H1_DURATION, DEFAULT_K, detect_swings
-
-logger = logging.getLogger(__name__)
 
 
 def detect_structure(
@@ -54,7 +55,9 @@ def detect_structure(
     Trả về:
         DataFrame chứa các sự kiện cấu trúc với các cột:
         - structure_id: int (tăng dần từ 0)
-        - event_type: str ('BULLISH_BOS', 'BEARISH_BOS', 'BULLISH_CHOCH', 'BEARISH_CHOCH')
+        - event_type: str ('BULLISH_INIT_BREAK', 'BEARISH_INIT_BREAK',
+                           'BULLISH_BOS', 'BEARISH_BOS',
+                           'BULLISH_CHOCH', 'BEARISH_CHOCH')
         - bar_index: int (chỉ số nến t phá vỡ cấu trúc)
         - time_candle: pd.Timestamp (giờ mở nến t)
         - time_available: pd.Timestamp (giờ đóng nến t: time_utc[t] + bar_duration)
@@ -79,11 +82,8 @@ def detect_structure(
         "new_trend",
     ]
 
-    if df.empty or len(df) == 0:
-        return pd.DataFrame(columns=columns_out)
-
     required_cols = {"time_utc", "close", "high", "low"}
-    # 1. Kiểm tra đủ cột trước tiên (kể cả DataFrame rỗng)
+    # 1. Kiểm tra đủ cột trước tiên (kể cả DataFrame rỗng, đồng nhất quy ước với swings.py)
     if not required_cols.issubset(df.columns):
         raise KeyError(f"DataFrame cần có đủ các cột: {required_cols}")
 
@@ -128,7 +128,15 @@ def detect_structure(
     ).reset_index(drop=True)
 
     times = sorted_df["time_utc"].tolist()
+    times_np = sorted_df["time_utc"].to_numpy()
     closes = sorted_df["close"].to_numpy(dtype=np.float64)
+
+    # Trích xuất mảng numpy từ swings để tối ưu hóa tốc độ vòng lặp (tránh gọi swings.iloc liên tục)
+    sw_avails = pd.to_datetime(swings["time_available"]).to_numpy()
+    sw_types = swings["swing_type"].to_numpy()
+    sw_prices = swings["price"].to_numpy(dtype=np.float64)
+    sw_ids = swings["swing_id"].to_numpy(dtype=np.int64)
+    sw_bars = swings["bar_index"].to_numpy(dtype=np.int64)
 
     # Danh sách các swing chưa bị phá: lưu trữ dict
     # Mỗi phần tử: {'swing_id': int, 'price': float, 'bar_index': int, 'time_available': pd.Timestamp}
@@ -144,23 +152,22 @@ def detect_structure(
 
     for t in range(n_bars):
         t_open = times[t]
+        t_open_np = times_np[t]
         t_close = t_open + bar_duration
         close_t = closes[t]
 
         # Nạp tất cả các swing có time_available <= t_open (không look-ahead)
         while swing_idx < n_swings:
-            sw_avail = pd.Timestamp(swings.iloc[swing_idx]["time_available"])
-            if sw_avail <= t_open:
-                sw_row = swings.iloc[swing_idx]
+            if sw_avails[swing_idx] <= t_open_np:
                 sw_item = {
-                    "swing_id": int(sw_row["swing_id"]),
-                    "price": float(sw_row["price"]),
-                    "bar_index": int(sw_row["bar_index"]),
-                    "time_available": sw_avail,
+                    "swing_id": int(sw_ids[swing_idx]),
+                    "price": float(sw_prices[swing_idx]),
+                    "bar_index": int(sw_bars[swing_idx]),
+                    "time_available": pd.Timestamp(sw_avails[swing_idx]),
                 }
-                if sw_row["swing_type"] == "HIGH":
+                if sw_types[swing_idx] == "HIGH":
                     unbroken_highs.append(sw_item)
-                elif sw_row["swing_type"] == "LOW":
+                elif sw_types[swing_idx] == "LOW":
                     unbroken_lows.append(sw_item)
                 swing_idx += 1
             else:
@@ -172,6 +179,7 @@ def detect_structure(
 
         event_type: str | None = None
         broken_target: dict[str, object] | None = None
+        broken_side: str | None = None
         prior_trend = trend_state
         new_trend = trend_state
 
@@ -181,11 +189,13 @@ def detect_structure(
             if protected_high is not None and close_t > float(protected_high["price"]):
                 event_type = "BULLISH_BOS"
                 broken_target = protected_high
+                broken_side = "HIGH"
                 new_trend = "BULLISH"
             # 2. Phá đáy được bảo vệ -> Đảo chiều giảm (BEARISH_CHOCH)
             elif protected_low is not None and close_t < float(protected_low["price"]):
                 event_type = "BEARISH_CHOCH"
                 broken_target = protected_low
+                broken_side = "LOW"
                 new_trend = "BEARISH"
                 trend_state = "BEARISH"
 
@@ -194,11 +204,13 @@ def detect_structure(
             if protected_low is not None and close_t < float(protected_low["price"]):
                 event_type = "BEARISH_BOS"
                 broken_target = protected_low
+                broken_side = "LOW"
                 new_trend = "BEARISH"
             # 2. Phá đỉnh được bảo vệ -> Đảo chiều tăng (BULLISH_CHOCH)
             elif protected_high is not None and close_t > float(protected_high["price"]):
                 event_type = "BULLISH_CHOCH"
                 broken_target = protected_high
+                broken_side = "HIGH"
                 new_trend = "BULLISH"
                 trend_state = "BULLISH"
 
@@ -208,16 +220,18 @@ def detect_structure(
             if protected_high is not None and close_t > float(protected_high["price"]):
                 event_type = "BULLISH_INIT_BREAK"
                 broken_target = protected_high
+                broken_side = "HIGH"
                 new_trend = "BULLISH"
                 trend_state = "BULLISH"
             elif protected_low is not None and close_t < float(protected_low["price"]):
                 event_type = "BEARISH_INIT_BREAK"
                 broken_target = protected_low
+                broken_side = "LOW"
                 new_trend = "BEARISH"
                 trend_state = "BEARISH"
 
         # Nếu có sự kiện kích hoạt
-        if event_type is not None and broken_target is not None:
+        if event_type is not None and broken_target is not None and broken_side is not None:
             p_broken = float(broken_target["price"])
 
             records.append({
@@ -236,12 +250,12 @@ def detect_structure(
 
             # Quy tắc First Break & Vô hiệu hóa Swing cũ bị che khuất (Shadowed Swings Elimination):
             # Nếu phá High: Toàn bộ Swing High chưa bị phá có giá <= max(P, close_t) chuyển sang BROKEN
-            if "BULLISH" in event_type:
+            if broken_side == "HIGH":
                 threshold = max(p_broken, close_t)
                 unbroken_highs = [h for h in unbroken_highs if float(h["price"]) > threshold]
 
             # Nếu phá Low: Toàn bộ Swing Low chưa bị phá có giá >= min(P, close_t) chuyển sang BROKEN
-            if "BEARISH" in event_type:
+            elif broken_side == "LOW":
                 threshold = min(p_broken, close_t)
                 unbroken_lows = [l for l in unbroken_lows if float(l["price"]) < threshold]
 
@@ -266,7 +280,7 @@ def get_structure_available_at(
     Tham số:
         structure_df: DataFrame đầu ra từ detect_structure.
         current_time: Thời điểm hiện tại cần lọc.
-        event_type: Lọc theo loại sự kiện ('BULLISH_BOS', 'BEARISH_BOS', v.v.), None lấy tất cả.
+        event_type: Lọc theo loại sự kiện ('BULLISH_INIT_BREAK', 'BULLISH_BOS', v.v.), None lấy tất cả.
 
     Trả về:
         DataFrame các sự kiện có time_available <= current_time.

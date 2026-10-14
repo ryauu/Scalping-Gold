@@ -10,6 +10,7 @@
 - **C5 (Đóng băng hệ số ATR):** Đưa hệ số $\alpha_{ATR} = 0,5$ vào bảng tham số PRIMARY để triệt tiêu bậc tự do ẩn.
 - **C6 (Đăng ký quy tắc thoát lệnh SMC):** Đăng ký chính thức tỷ lệ R:R = 1:2 ($TP = Entry \pm 2 \cdot R_{dist}$) và kiểm soát ngẫu nhiên đối chứng C4.
 - **C7 (Bảng tần suất sự kiện theo năm):** Bổ sung bảng số liệu thực nghiệm đầy đủ 2018–2025 trên H1 Development ($k=3$ và $k=5$).
+- **C8 (Quy tắc Warm-up Period):** Bắt buộc nạp tối thiểu 6 tháng dữ liệu khởi động trước mốc 2018-01-01 để triệt tiêu ảnh hưởng của trạng thái ban đầu NEUTRAL và chờ nạp swings.
 
 ---
 
@@ -100,6 +101,13 @@ Tại mỗi nến H1 $t$, việc kiểm tra phá vỡ được đối chiếu v�
      **Mức đó chuyển sang `BROKEN`, ĐỒNG THỜI TOÀN BỘ các Swing High chưa bị phá khác có giá $\le \max(P, Close[t])$ CŨNG LẬP TỨC CHUYỂN SANG `BROKEN`.**
    - Khi một Swing Low tại mức giá $P$ bị phá vỡ ($Close[t] < P$):  
      **Mức đó chuyển sang `BROKEN`, ĐỒNG THỜI TOÀN BỘ các Swing Low chưa bị phá khác có giá $\ge \min(P, Close[t])$ CŨNG LẬP TỨC CHUYỂN SANG `BROKEN`.**
+
+### 3.4. Quy tắc khởi động (Warm-up Period Rule) triệt tiêu sai lệch trạng thái NEUTRAL ban đầu
+- **Vấn đề rủi ro khởi động:** Thuật toán cấu trúc thị trường luôn khởi tạo ở trạng thái `NEUTRAL`. Nếu nạp dữ liệu bắt đầu đúng ngày đầu tiên của giai đoạn phân tích (ví dụ `2018-01-01`), những nến đầu tiên hoàn toàn chưa có swing nào khả dụng (do cần tối thiểu $2k+1$ nến và độ trễ xác nhận $k$ nến). Khi mức swing đầu tiên bị phá vỡ, sự kiện đó bị gắn nhãn `INIT_BREAK` và bị bỏ qua không tạo tín hiệu, đồng thời trạng thái xu hướng trong những ngày đầu tháng 01/2018 bị sai lệch so với diễn biến tự nhiên của thị trường.
+- **Quy tắc bắt buộc:**
+  - Khi chạy phát hiện cấu trúc trên tập Development (`2018-01-01` đến `2025-06-30`), **BẮT BUỘC phải nạp thêm một giai đoạn khởi động (Warm-up period) tối thiểu 6 tháng trước đó** (khuyến nghị nạp từ `2017-06-01` hoặc `2017-01-01`; kho dữ liệu DuckDB có sẵn từ `2014-06-01`).
+  - Toàn bộ chuỗi Swings và Cấu trúc được tính toán liên tục từ ngày bắt đầu warm-up.
+  - Sau khi tính toán xong, **chỉ giữ lại các sự kiện có $\text{time\_candle} \ge \text{2018-01-01 00:00:00 UTC}$** cho mục đích thống kê, kiểm thử và sinh tín hiệu giao dịch. Quy tắc này đảm bảo tại thời điểm mở phiên ngày 2018-01-01, thị trường đã có sẵn các mức swing được bảo vệ từ cuối năm 2017 và xu hướng đã được xác lập tự nhiên (`BULLISH` hoặc `BEARISH`), biến các pha phá vỡ đầu năm 2018 thành các sự kiện `BOS` hoặc `CHOCH` thực thụ.
 
 ---
 

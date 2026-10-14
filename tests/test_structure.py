@@ -319,6 +319,44 @@ class TestStructureModule(unittest.TestCase):
             exact = get_structure_available_at(struct_df, t_avail)
             self.assertGreaterEqual(len(exact), 1)
 
+    def test_08_empty_df_missing_columns_raises_keyerror(self):
+        """8. Kiểm tra thứ tự đầu vào: DataFrame rỗng nhưng thiếu cột bắt buộc phải raise KeyError."""
+        empty_bad_df = pd.DataFrame(columns=["col_a", "col_b"])
+        with self.assertRaises(KeyError):
+            detect_structure(empty_bad_df, k=3)
+
+        # DataFrame rỗng nhưng có đủ cột thì trả về DataFrame rỗng hợp lệ
+        empty_good_df = pd.DataFrame(columns=["time_utc", "close", "high", "low"])
+        res = detect_structure(empty_good_df, k=3)
+        self.assertTrue(res.empty)
+        self.assertIn("structure_id", res.columns)
+
+    def test_09_warm_up_mitigates_initial_neutral_bias(self):
+        """9. Rủi ro khởi động (Warm-up Period):
+
+        Chứng minh nếu nạp từ 2018-01-01 không có warm-up:
+        - Thị trường bắt đầu từ NEUTRAL, nến đầu bị gắn nhãn INIT_BREAK (không sinh tín hiệu).
+        Nếu nạp có warm-up (từ 2017-06-01):
+        - Thị trường bước vào ngày 2018-01-01 với xu hướng đã được xác lập tự nhiên (BULLISH/BEARISH).
+        - Sự kiện đầu tiên trong năm 2018 là BOS thật sự chứ không phải INIT_BREAK giả tạo.
+        """
+        df_no_warm = load_h1("2018-01-01", "2018-01-15")
+        s_no = detect_structure(df_no_warm, k=3)
+        self.assertFalse(s_no.empty)
+        self.assertEqual(s_no.iloc[0]["prior_trend"], "NEUTRAL")
+        self.assertIn("INIT_BREAK", s_no.iloc[0]["event_type"])
+
+        # Có warm-up từ 2017-06
+        df_warm = load_h1("2017-06-01", "2018-01-15")
+        s_warm = detect_structure(df_warm, k=3)
+        s_warm_2018 = s_warm[s_warm["time_candle"] >= "2018-01-01"].reset_index(drop=True)
+
+        self.assertFalse(s_warm_2018.empty)
+        # Tại năm 2018, xu hướng đã xác lập từ trước đó (không phải NEUTRAL)
+        self.assertNotEqual(s_warm_2018.iloc[0]["prior_trend"], "NEUTRAL")
+        self.assertIn(s_warm_2018.iloc[0]["event_type"], ["BULLISH_BOS", "BEARISH_BOS", "BULLISH_CHOCH", "BEARISH_CHOCH"])
+
 
 if __name__ == "__main__":
     unittest.main()
+
