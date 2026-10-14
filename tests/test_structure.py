@@ -35,11 +35,11 @@ from src.backtest.smc.swings import DEFAULT_H1_DURATION, detect_swings
 
 class TestStructureModule(unittest.TestCase):
     def test_01_neutral_initialization_no_false_choch(self):
-        """1. NEUTRAL ban đầu: Chỉ sinh BOS khởi tạo xu hướng, không sinh CHoCH."""
+        """1. NEUTRAL ban đầu: Chỉ sinh INIT_BREAK khởi tạo xu hướng, không sinh CHoCH."""
         # 10 nến H1:
         # Nến 0, 1, 2, 3, 4 tạo Swing High tại nến 2 (k=2) giá 1520.0
         # Swing High khả dụng tại nến 4 đóng cửa (times[4] + 1h = times[5])
-        times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h")
         highs = [1500.0, 1510.0, 1520.0, 1512.0, 1505.0, 1508.0, 1525.0, 1522.0, 1520.0, 1518.0]
         lows = [1495.0, 1502.0, 1508.0, 1504.0, 1498.0, 1500.0, 1506.0, 1515.0, 1512.0, 1510.0]
         # Nến 6 đóng cửa tại 1524.0 (> 1520.0)
@@ -55,10 +55,10 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, k=2)
 
-        # Nến 6 phá đỉnh 1520.0 khi đang NEUTRAL -> Phải sinh BULLISH_BOS (không phải CHoCH)
+        # Nến 6 phá đỉnh 1520.0 khi đang NEUTRAL -> Phải sinh BULLISH_INIT_BREAK (khởi tạo, không phải CHoCH)
         self.assertEqual(len(struct_df), 1)
         ev = struct_df.iloc[0]
-        self.assertEqual(ev["event_type"], "BULLISH_BOS")
+        self.assertEqual(ev["event_type"], "BULLISH_INIT_BREAK")
         self.assertEqual(ev["bar_index"], 6)
         self.assertEqual(ev["price_broken"], 1520.0)
         self.assertEqual(ev["prior_trend"], "NEUTRAL")
@@ -66,14 +66,14 @@ class TestStructureModule(unittest.TestCase):
         self.assertEqual(ev["time_available"], times[6] + DEFAULT_H1_DURATION)
 
     def test_02_bos_first_break_only_rule(self):
-        """2. Quy tắc First Break Only: Nến tiếp theo đóng trên mức cũ không được sinh thêm BOS."""
-        times = pd.date_range("2024-01-02 00:00", periods=9, freq="1h", tz="UTC")
+        """2. Quy tắc First Break Only: Nến tiếp theo đóng trên mức cũ không được sinh thêm sự kiện."""
+        times = pd.date_range("2024-01-02 00:00", periods=9, freq="1h")
         # Nến 2 tạo Swing High tại 1520.0 (k=2), khả dụng tại nến 4 đóng
         highs = [1500.0, 1510.0, 1520.0, 1512.0, 1505.0, 1525.0, 1528.0, 1526.0, 1522.0]
         lows = [1495.0, 1502.0, 1508.0, 1504.0, 1498.0, 1500.0, 1520.0, 1518.0, 1515.0]
-        # Nến 5 đóng tại 1523.0 (> 1520.0) -> BOS
-        # Nến 6 đóng tại 1526.0 (> 1520.0) -> KHÔNG ĐƯỢC sinh thêm BOS
-        # Nến 7 đóng tại 1524.0 (> 1520.0) -> KHÔNG ĐƯỢC sinh thêm BOS
+        # Nến 5 đóng tại 1523.0 (> 1520.0) -> INIT_BREAK
+        # Nến 6 đóng tại 1526.0 (> 1520.0) -> KHÔNG ĐƯỢC sinh thêm sự kiện
+        # Nến 7 đóng tại 1524.0 (> 1520.0) -> KHÔNG ĐƯỢC sinh thêm sự kiện
         closes = [1498.0, 1508.0, 1515.0, 1508.0, 1502.0, 1523.0, 1526.0, 1524.0, 1520.0]
 
         df = pd.DataFrame({
@@ -86,10 +86,10 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, k=2)
 
-        # Chỉ có duy nhất 1 BOS tại nến 5
+        # Chỉ có duy nhất 1 sự kiện tại nến 5
         self.assertEqual(len(struct_df), 1)
         self.assertEqual(struct_df.iloc[0]["bar_index"], 5)
-        self.assertEqual(struct_df.iloc[0]["event_type"], "BULLISH_BOS")
+        self.assertEqual(struct_df.iloc[0]["event_type"], "BULLISH_INIT_BREAK")
 
     def test_03_shadowed_swings_elimination(self):
         """3. Lỗ hổng 'Swing cũ bị che khuất' (Shadowed Swings):
@@ -98,10 +98,10 @@ class TestStructureModule(unittest.TestCase):
         - Swing High 1 tại 100.0 (bar 2, khả dụng bar 4)
         - Swing High 2 tại 110.0 (bar 6, hình thành nhờ râu vượt 100 nhưng không nến nào đóng trên 100)
         - Bar 9 đóng tại 105.0: Không BOS (tham chiếu là 110.0)
-        - Bar 10 đóng tại 112.0: Phá 110.0 -> Sinh BULLISH_BOS, ĐỒNG THỜI xóa sổ Swing 1 (100.0 <= 110.0)
+        - Bar 10 đóng tại 112.0: Phá 110.0 -> Sinh BULLISH_INIT_BREAK, ĐỒNG THỜI xóa sổ Swing 1 (100.0 <= 110.0)
         - Bar 11 đóng tại 108.0: KHÔNG ĐƯỢC sinh BOS ma cho mức 100.0!
         """
-        times = pd.date_range("2024-01-02 00:00", periods=14, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=14, freq="1h")
         highs = [
             90.0, 95.0, 100.0, 96.0, 92.0,  # 0..4: Bar 2 là Swing High 100.0 (k=2)
             98.0, 110.0, 97.0, 95.0,        # 5..8: Bar 6 là Swing High 110.0 (râu lên 110 nhưng close <= 98)
@@ -129,38 +129,34 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, k=2)
 
-        # Kiểm tra: Chỉ có duy nhất 1 BOS tại bar 10 phá mức 110.0
+        # Kiểm tra: Chỉ có duy nhất 1 sự kiện tại bar 10 phá mức 110.0
         # Bar 11 đóng tại 108.0 tuyệt đối KHÔNG ĐƯỢC sinh BOS cho mức 100.0
-        self.assertEqual(len(struct_df), 1, "Chỉ được sinh đúng 1 BOS, không có BOS ma tại bar 11")
+        self.assertEqual(len(struct_df), 1, "Chỉ được sinh đúng 1 sự kiện, không có BOS ma tại bar 11")
         ev = struct_df.iloc[0]
         self.assertEqual(ev["bar_index"], 10)
         self.assertEqual(ev["price_broken"], 110.0)
-        self.assertEqual(ev["event_type"], "BULLISH_BOS")
+        self.assertEqual(ev["event_type"], "BULLISH_INIT_BREAK")
 
-    def test_04_choch_state_flip(self):
-        """4. Test CHoCH lật trạng thái:
+    def test_04_choch_state_flip_and_subsequent_bos(self):
+        """4. Test CHoCH lật trạng thái và BOS tiếp diễn:
 
-        - Đang BEARISH (sau Bearish BOS), nến đóng trên Protected High -> BULLISH_CHOCH, lật sang BULLISH.
-        - Đang BULLISH, nến đóng dưới Protected Low -> BEARISH_CHOCH, lật sang BEARISH.
+        - Đang NEUTRAL -> phá đáy 1478.0 sinh BEARISH_INIT_BREAK, xu hướng thành BEARISH.
+        - Đang BEARISH, nến đóng trên Protected High 1520.0 -> BULLISH_CHOCH, lật sang BULLISH.
+        - Đang BULLISH, nến tiếp theo đóng trên Swing High mới 1532.0 -> BULLISH_BOS (tiếp diễn tăng).
         """
         # Tạo chuỗi nến có đủ cả giảm tạo đáy rồi đảo chiều vượt đỉnh
-        times = pd.date_range("2024-01-02 00:00", periods=16, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=20, freq="1h")
 
-        # Nến 2 tạo Swing High tại 1520.0
-        # Nến 5 tạo Swing Low tại 1478.0
-        # Nến 8 đóng tại 1465.0 (< 1478.0) -> Xác lập BEARISH_BOS (xu hướng chuyển sang BEARISH)
-        # Nến 11 đóng tại 1525.0 (> 1520.0) -> Khi đang BEARISH mà phá đỉnh 1520.0 -> BULLISH_CHOCH!
         highs = [
             1500.0, 1515.0, 1520.0, 1510.0, 1495.0, 1490.0, 1485.0, 1480.0,
-            1475.0, 1500.0, 1515.0, 1530.0, 1535.0, 1532.0, 1528.0, 1525.0
+            1475.0, 1500.0, 1515.0, 1530.0, 1535.0, 1532.0, 1528.0, 1525.0,
+            1538.0, 1542.0, 1539.0, 1535.0
         ]
-        lows = [
-            1490.0, 1505.0, 1510.0, 1490.0, 1482.0, 1478.0, 1470.0, 1465.0,
-            1460.0, 1485.0, 1500.0, 1518.0, 1520.0, 1522.0, 1520.0, 1515.0
-        ]
+        lows = [h - 15.0 for h in highs]
         closes = [
             1495.0, 1510.0, 1515.0, 1495.0, 1488.0, 1482.0, 1475.0, 1470.0,
-            1465.0, 1498.0, 1512.0, 1525.0, 1530.0, 1528.0, 1522.0, 1518.0
+            1465.0, 1498.0, 1512.0, 1525.0, 1530.0, 1528.0, 1522.0, 1524.0,
+            1536.0, 1540.0, 1537.0, 1533.0
         ]
 
         df = pd.DataFrame({
@@ -171,9 +167,10 @@ class TestStructureModule(unittest.TestCase):
             "close": closes,
         })
 
-        # Cung cấp swings thủ công để kiểm soát chính xác trạng thái
-        # Swing High tại bar 2 (1520.0, khả dụng bar 4 close = times[5])
-        # Swing Low tại bar 5 (1478.0, khả dụng bar 7 close = times[8])
+        # Cung cấp swings thủ công:
+        # Swing High 0 tại bar 2 (1520.0, khả dụng bar 4 close = times[5])
+        # Swing Low 1 tại bar 5 (1478.0, khả dụng bar 7 close = times[8])
+        # Swing High 2 tại bar 12 (1535.0, khả dụng bar 14 close = times[15])
         swings_data = [
             {
                 "swing_id": 0,
@@ -193,19 +190,28 @@ class TestStructureModule(unittest.TestCase):
                 "price": 1478.0,
                 "k": 2,
             },
+            {
+                "swing_id": 2,
+                "swing_type": "HIGH",
+                "bar_index": 12,
+                "time_candle": times[12],
+                "time_available": times[14] + DEFAULT_H1_DURATION,
+                "price": 1535.0,
+                "k": 2,
+            },
         ]
         swings_df = pd.DataFrame(swings_data)
 
-        # Bar 8 mở lúc times[8]. Swing Low (1478.0) khả dụng lúc times[8].
-        # Close bar 8 là 1465.0 < 1478.0 -> Khởi tạo BEARISH_BOS!
-        # Bar 11 đóng lúc 1525.0 > 1520.0 (Protected High lúc này là Swing 0) -> BULLISH_CHOCH!
+        # Bar 8: close 1465.0 < 1478.0 -> BEARISH_INIT_BREAK (lập xu hướng BEARISH)
+        # Bar 11: close 1525.0 > 1520.0 -> BULLISH_CHOCH (đảo chiều sang BULLISH)
+        # Bar 16: close 1536.0 > 1535.0 -> BULLISH_BOS (tiếp diễn khi đã ở BULLISH)
         struct_df = detect_structure(df, swings_df=swings_df, bar_duration=DEFAULT_H1_DURATION)
 
-        self.assertEqual(len(struct_df), 2)
+        self.assertEqual(len(struct_df), 3)
 
-        # Sự kiện 1: Phá đáy 1478.0 khi NEUTRAL -> BEARISH_BOS
+        # Sự kiện 1: Khởi tạo từ NEUTRAL -> BEARISH_INIT_BREAK
         ev1 = struct_df.iloc[0]
-        self.assertEqual(ev1["event_type"], "BEARISH_BOS")
+        self.assertEqual(ev1["event_type"], "BEARISH_INIT_BREAK")
         self.assertEqual(ev1["price_broken"], 1478.0)
         self.assertEqual(ev1["new_trend"], "BEARISH")
 
@@ -215,6 +221,13 @@ class TestStructureModule(unittest.TestCase):
         self.assertEqual(ev2["price_broken"], 1520.0)
         self.assertEqual(ev2["prior_trend"], "BEARISH")
         self.assertEqual(ev2["new_trend"], "BULLISH")
+
+        # Sự kiện 3: Khi đang BULLISH, phá đỉnh mới 1535.0 -> BULLISH_BOS
+        ev3 = struct_df.iloc[2]
+        self.assertEqual(ev3["event_type"], "BULLISH_BOS")
+        self.assertEqual(ev3["price_broken"], 1535.0)
+        self.assertEqual(ev3["prior_trend"], "BULLISH")
+        self.assertEqual(ev3["new_trend"], "BULLISH")
 
     def test_05_prefix_invariance_on_real_h1(self):
         """5. TEST BẤT BIẾN THEO TIỀN TỐ TRÊN DỮ LIỆU H1 THẬT (BẮT BUỘC).

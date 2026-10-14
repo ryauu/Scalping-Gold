@@ -58,21 +58,35 @@ def detect_swings(
         "k",
     ]
 
-    if df.empty or len(df) < (2 * k + 1) or k <= 0:
-        return pd.DataFrame(columns=columns_out)
-
+    # 1. Kiểm tra đủ cột trước tiên (kể cả với DataFrame rỗng)
     if not {"time_utc", "high", "low"}.issubset(df.columns):
         raise KeyError("DataFrame đầu vào cần có đủ các cột: 'time_utc', 'high', 'low'")
 
-    # Bảo vệ chống NaN: Tuyệt đối không chấp nhận NaN để tránh so sánh <= NaN ra False
+    if df.empty or len(df) < (2 * k + 1) or k <= 0:
+        return pd.DataFrame(columns=columns_out)
+
+    # 2. Bảo vệ chống NaN: Tuyệt đối không chấp nhận NaN để tránh so sánh <= NaN ra False
     if df["time_utc"].isna().any():
         raise ValueError("Cột 'time_utc' chứa giá trị NaN/NaT.")
     if df["high"].isna().any() or df["low"].isna().any():
         raise ValueError("Cột 'high' hoặc 'low' chứa giá trị NaN.")
 
-    # Đảm bảo nến được sắp xếp tăng dần theo thời gian
-    sorted_df = df.sort_values("time_utc").reset_index(drop=True)
-    times = pd.to_datetime(sorted_df["time_utc"]).to_numpy()
+    # 3. Chuẩn hóa múi giờ sang UTC naive nhất quán (nếu có tz thì convert sang UTC rồi bỏ tz)
+    time_series = pd.to_datetime(df["time_utc"])
+    if time_series.dt.tz is not None:
+        time_series = time_series.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    sorted_df = df.copy()
+    sorted_df["time_utc"] = time_series
+    sorted_df = sorted_df.sort_values("time_utc", kind="stable").reset_index(drop=True)
+
+    # 4. Kiểm tra thời gian tăng nghiêm ngặt (không trùng lặp)
+    if sorted_df["time_utc"].duplicated().any():
+        raise ValueError("Dữ liệu 'time_utc' chứa các mốc thời gian bị trùng lặp.")
+    if not sorted_df["time_utc"].is_monotonic_increasing:
+        raise ValueError("Dữ liệu 'time_utc' phải được sắp xếp tăng dần nghiêm ngặt.")
+
+    times = sorted_df["time_utc"].tolist()
     highs = sorted_df["high"].to_numpy(dtype=np.float64)
     lows = sorted_df["low"].to_numpy(dtype=np.float64)
 
@@ -101,8 +115,8 @@ def detect_swings(
                 is_low = False
                 break
 
-        t_candle = pd.Timestamp(times[i])
-        t_available = pd.Timestamp(times[i + k]) + bar_duration
+        t_candle = times[i]
+        t_available = times[i + k] + bar_duration
 
         if is_high:
             records.append({
@@ -128,8 +142,10 @@ def detect_swings(
         return pd.DataFrame(columns=columns_out)
 
     swings_df = pd.DataFrame(records)
-    # Sắp xếp theo time_available tăng dần, nếu bằng nhau thì theo bar_index
-    swings_df = swings_df.sort_values(["time_available", "bar_index"]).reset_index(drop=True)
+    # Sắp xếp ổn định (kind='stable') với 3 khóa: time_available, bar_index, swing_type
+    swings_df = swings_df.sort_values(
+        ["time_available", "bar_index", "swing_type"], kind="stable"
+    ).reset_index(drop=True)
     swings_df["swing_id"] = swings_df.index
     swings_df = swings_df[columns_out]
 
@@ -154,14 +170,19 @@ def get_swings_available_at(
     if swings_df.empty:
         return swings_df.copy()
 
-    ts = pd.Timestamp(current_time)
-    if swings_df["time_available"].dt.tz is not None and ts.tzinfo is None:
-        ts = ts.tz_localize(swings_df["time_available"].dt.tz)
-    elif swings_df["time_available"].dt.tz is None and ts.tzinfo is not None:
-        ts = ts.tz_localize(None)
+    # Chuẩn hóa current_time sang UTC naive nhất quán
+    ts = pd.to_datetime(current_time)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
 
-    mask = swings_df["time_available"] <= ts
+    # Chuẩn hóa time_available trong DataFrame sang UTC naive
+    avail_series = pd.to_datetime(swings_df["time_available"])
+    if avail_series.dt.tz is not None:
+        avail_series = avail_series.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    mask = avail_series <= ts
     if swing_type is not None:
         mask = mask & (swings_df["swing_type"] == swing_type.strip().upper())
 
     return swings_df[mask].copy().reset_index(drop=True)
+

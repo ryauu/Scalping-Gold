@@ -44,25 +44,33 @@ def main():
 
     # 2. Swing Highs
     highs = swings[swings["swing_type"] == "HIGH"]
+    high_hover = [
+        f"<b>Swing High (k=3)</b><br>Giá đỉnh: {p:.2f}<br>Nến tạo: {t}<br>Khả dụng lúc: {a}"
+        for p, t, a in zip(highs["price"], highs["time_candle"], highs["time_available"])
+    ]
     fig.add_trace(go.Scatter(
         x=highs["time_candle"],
         y=highs["price"],
-        mode="markers+text",
+        mode="markers",
         marker=dict(symbol="triangle-down", size=12, color="#2e7d32"),
-        text=[f"SH {p:.1f}" for p in highs["price"]],
-        textposition="top center",
+        hoverinfo="text",
+        hovertext=high_hover,
         name="Swing High (k=3)",
     ))
 
     # 3. Swing Lows
     lows = swings[swings["swing_type"] == "LOW"]
+    low_hover = [
+        f"<b>Swing Low (k=3)</b><br>Giá đáy: {p:.2f}<br>Nến tạo: {t}<br>Khả dụng lúc: {a}"
+        for p, t, a in zip(lows["price"], lows["time_candle"], lows["time_available"])
+    ]
     fig.add_trace(go.Scatter(
         x=lows["time_candle"],
         y=lows["price"],
-        mode="markers+text",
+        mode="markers",
         marker=dict(symbol="triangle-up", size=12, color="#c62828"),
-        text=[f"SL {p:.1f}" for p in lows["price"]],
-        textposition="bottom center",
+        hoverinfo="text",
+        hovertext=low_hover,
         name="Swing Low (k=3)",
     ))
 

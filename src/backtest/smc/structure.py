@@ -83,16 +83,34 @@ def detect_structure(
         return pd.DataFrame(columns=columns_out)
 
     required_cols = {"time_utc", "close", "high", "low"}
+    # 1. Kiểm tra đủ cột trước tiên (kể cả DataFrame rỗng)
     if not required_cols.issubset(df.columns):
         raise KeyError(f"DataFrame cần có đủ các cột: {required_cols}")
 
-    # Bảo vệ chống NaN
+    if df.empty or len(df) == 0:
+        return pd.DataFrame(columns=columns_out)
+
+    # 2. Bảo vệ chống NaN
     if df["time_utc"].isna().any():
         raise ValueError("Cột 'time_utc' chứa giá trị NaN/NaT.")
     if df["close"].isna().any() or df["high"].isna().any() or df["low"].isna().any():
         raise ValueError("Cột giá ('close', 'high', hoặc 'low') chứa giá trị NaN.")
 
-    sorted_df = df.sort_values("time_utc").reset_index(drop=True)
+    # 3. Chuẩn hóa time_utc sang UTC naive nhất quán
+    time_series = pd.to_datetime(df["time_utc"])
+    if time_series.dt.tz is not None:
+        time_series = time_series.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    sorted_df = df.copy()
+    sorted_df["time_utc"] = time_series
+    sorted_df = sorted_df.sort_values("time_utc", kind="stable").reset_index(drop=True)
+
+    # 4. Kiểm tra thời gian tăng nghiêm ngặt (không trùng lặp)
+    if sorted_df["time_utc"].duplicated().any():
+        raise ValueError("Dữ liệu 'time_utc' chứa các mốc thời gian bị trùng lặp.")
+    if not sorted_df["time_utc"].is_monotonic_increasing:
+        raise ValueError("Dữ liệu 'time_utc' phải được sắp xếp tăng dần nghiêm ngặt.")
+
     n_bars = len(sorted_df)
 
     # Phát hiện swings nếu chưa có
@@ -104,10 +122,12 @@ def detect_structure(
     if swings.empty:
         return pd.DataFrame(columns=columns_out)
 
-    # Đảm bảo sắp xếp swings theo time_available và bar_index
-    swings = swings.sort_values(["time_available", "bar_index"]).reset_index(drop=True)
+    # Đảm bảo sắp xếp swings ổn định theo time_available, bar_index, swing_type
+    swings = swings.sort_values(
+        ["time_available", "bar_index", "swing_type"], kind="stable"
+    ).reset_index(drop=True)
 
-    times = pd.to_datetime(sorted_df["time_utc"]).to_numpy()
+    times = sorted_df["time_utc"].tolist()
     closes = sorted_df["close"].to_numpy(dtype=np.float64)
 
     # Danh sách các swing chưa bị phá: lưu trữ dict
@@ -123,7 +143,7 @@ def detect_structure(
     n_swings = len(swings)
 
     for t in range(n_bars):
-        t_open = pd.Timestamp(times[t])
+        t_open = times[t]
         t_close = t_open + bar_duration
         close_t = closes[t]
 
@@ -146,7 +166,7 @@ def detect_structure(
             else:
                 break
 
-        # Xác định mức được bảo vệ (Protected Level - phần tử cuối cùng trong danh sách chưa bị phá)
+        # Xác định mức được bảo vệ (Protected Level - gần nhất theo thời gian time_available)
         protected_high = unbroken_highs[-1] if unbroken_highs else None
         protected_low = unbroken_lows[-1] if unbroken_lows else None
 
@@ -155,7 +175,7 @@ def detect_structure(
         prior_trend = trend_state
         new_trend = trend_state
 
-        # Phân định sự kiện theo ma trận trạng thái xu hướng (SMC_SPEC.md mục 3.2)
+        # Phân định sự kiện theo ma trận trạng thái xu hướng (SMC_SPEC.md mục 3.2 v2)
         if trend_state == "BULLISH":
             # 1. Phá đỉnh được bảo vệ -> Tiếp diễn tăng (BULLISH_BOS)
             if protected_high is not None and close_t > float(protected_high["price"]):
@@ -183,15 +203,15 @@ def detect_structure(
                 trend_state = "BULLISH"
 
         elif trend_state == "NEUTRAL":
-            # Khi NEUTRAL: Phá đỉnh -> Khởi tạo BULLISH_BOS; Phá đáy -> Khởi tạo BEARISH_BOS
-            # Tuyệt đối không sinh CHoCH khi đang ở NEUTRAL
+            # Khi NEUTRAL: Phá đỉnh -> Khởi tạo BULLISH_INIT_BREAK; Phá đáy -> Khởi tạo BEARISH_INIT_BREAK
+            # Tuyệt đối không sinh CHoCH khi đang ở NEUTRAL, và không dùng làm tín hiệu BOS tiếp diễn
             if protected_high is not None and close_t > float(protected_high["price"]):
-                event_type = "BULLISH_BOS"
+                event_type = "BULLISH_INIT_BREAK"
                 broken_target = protected_high
                 new_trend = "BULLISH"
                 trend_state = "BULLISH"
             elif protected_low is not None and close_t < float(protected_low["price"]):
-                event_type = "BEARISH_BOS"
+                event_type = "BEARISH_INIT_BREAK"
                 broken_target = protected_low
                 new_trend = "BEARISH"
                 trend_state = "BEARISH"
@@ -216,12 +236,12 @@ def detect_structure(
 
             # Quy tắc First Break & Vô hiệu hóa Swing cũ bị che khuất (Shadowed Swings Elimination):
             # Nếu phá High: Toàn bộ Swing High chưa bị phá có giá <= max(P, close_t) chuyển sang BROKEN
-            if "BULLISH" in event_type or event_type == "BULLISH_CHOCH":
+            if "BULLISH" in event_type:
                 threshold = max(p_broken, close_t)
                 unbroken_highs = [h for h in unbroken_highs if float(h["price"]) > threshold]
 
             # Nếu phá Low: Toàn bộ Swing Low chưa bị phá có giá >= min(P, close_t) chuyển sang BROKEN
-            if "BEARISH" in event_type or event_type == "BEARISH_CHOCH":
+            if "BEARISH" in event_type:
                 threshold = min(p_broken, close_t)
                 unbroken_lows = [l for l in unbroken_lows if float(l["price"]) < threshold]
 
@@ -229,7 +249,9 @@ def detect_structure(
         return pd.DataFrame(columns=columns_out)
 
     structure_df = pd.DataFrame(records)
-    structure_df = structure_df.sort_values(["time_available", "bar_index"]).reset_index(drop=True)
+    structure_df = structure_df.sort_values(
+        ["time_available", "bar_index", "event_type"], kind="stable"
+    ).reset_index(drop=True)
     structure_df["structure_id"] = structure_df.index
     return structure_df[columns_out]
 
@@ -252,13 +274,16 @@ def get_structure_available_at(
     if structure_df.empty:
         return structure_df.copy()
 
-    ts = pd.Timestamp(current_time)
-    if structure_df["time_available"].dt.tz is not None and ts.tzinfo is None:
-        ts = ts.tz_localize(structure_df["time_available"].dt.tz)
-    elif structure_df["time_available"].dt.tz is None and ts.tzinfo is not None:
-        ts = ts.tz_localize(None)
+    # Chuẩn hóa current_time sang UTC naive nhất quán
+    ts = pd.to_datetime(current_time)
+    if ts.tzinfo is not None:
+        ts = ts.tz_convert("UTC").tz_localize(None)
 
-    mask = structure_df["time_available"] <= ts
+    avail_series = pd.to_datetime(structure_df["time_available"])
+    if avail_series.dt.tz is not None:
+        avail_series = avail_series.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    mask = avail_series <= ts
     if event_type is not None:
         mask = mask & (structure_df["event_type"] == event_type.strip().upper())
 

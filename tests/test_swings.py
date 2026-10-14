@@ -41,7 +41,7 @@ from src.backtest.smc.swings import (
 class TestSwingsModule(unittest.TestCase):
     def test_01_hand_calculated_high_k2(self):
         """1. Ca tính tay 1: high = [1, 2, 5, 2, 1] với k=2 cho Swing High tại chỉ số 2."""
-        times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h")
         highs = [1.0, 2.0, 5.0, 2.0, 1.0]
         lows = [0.5, 1.0, 1.5, 1.0, 0.5]
 
@@ -64,7 +64,7 @@ class TestSwingsModule(unittest.TestCase):
 
     def test_02_hand_calculated_tie_rejected(self):
         """2. Ca tính tay 2: high = [1, 5, 5, 2, 1] với k=2 không cho swing (ca hòa bị loại)."""
-        times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h")
         highs = [1.0, 5.0, 5.0, 2.0, 1.0]
         lows = [0.5, 1.0, 1.0, 1.0, 0.5]
 
@@ -83,7 +83,7 @@ class TestSwingsModule(unittest.TestCase):
 
     def test_03_same_bar_outside_candle_both_swings(self):
         """3. Ca tính tay 3: Nến ngoài (outside bar) đồng thời là cả Swing High và Swing Low."""
-        times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h")
         # Nến 2 vượt đỉnh 2 bên (20 > 12, 10 và 20 > 11, 9) VÀ thủng đáy 2 bên (2 < 7, 8 và 2 < 6, 8)
         highs = [10.0, 12.0, 20.0, 11.0, 9.0]
         lows = [8.0, 7.0, 2.0, 6.0, 8.0]
@@ -114,23 +114,23 @@ class TestSwingsModule(unittest.TestCase):
 
     def test_04_weekend_gap_time_available(self):
         """4. Ca tính tay 4: Kiểm tra time_available ở hai phía của khoảng trống cuối tuần."""
-        # Mô phỏng nến qua cuối tuần:
-        # Nến 0: Thứ Sáu 2024-01-05 19:00 UTC
-        # Nến 1: Thứ Sáu 2024-01-05 20:00 UTC
-        # Nến 2: Thứ Sáu 2024-01-05 21:00 UTC (Nến cuối tuần, đóng lúc 22:00 UTC - Tạo Swing High)
+        # Mô phỏng nến qua cuối tuần (UTC naive):
+        # Nến 0: Thứ Sáu 2024-01-05 19:00
+        # Nến 1: Thứ Sáu 2024-01-05 20:00
+        # Nến 2: Thứ Sáu 2024-01-05 21:00 (Nến cuối tuần, đóng lúc 22:00 - Tạo Swing High)
         # --- Khoảng trống cuối tuần 49 tiếng ---
-        # Nến 3: Chủ Nhật 2024-01-07 23:00 UTC (Nến mở cửa tuần mới, đóng lúc T2 00:00 UTC)
-        # Nến 4: Thứ Hai 2024-01-08 00:00 UTC (Nến sau gap - Tạo Swing Low)
-        # Nến 5: Thứ Hai 2024-01-08 01:00 UTC
-        # Nến 6: Thứ Hai 2024-01-08 02:00 UTC
+        # Nến 3: Chủ Nhật 2024-01-07 23:00 (Nến mở cửa tuần mới, đóng lúc T2 00:00)
+        # Nến 4: Thứ Hai 2024-01-08 00:00 (Nến sau gap - Tạo Swing Low)
+        # Nến 5: Thứ Hai 2024-01-08 01:00
+        # Nến 6: Thứ Hai 2024-01-08 02:00
         times = [
-            pd.Timestamp("2024-01-05 19:00:00+0000", tz="UTC"),
-            pd.Timestamp("2024-01-05 20:00:00+0000", tz="UTC"),
-            pd.Timestamp("2024-01-05 21:00:00+0000", tz="UTC"),
-            pd.Timestamp("2024-01-07 23:00:00+0000", tz="UTC"),
-            pd.Timestamp("2024-01-08 00:00:00+0000", tz="UTC"),
-            pd.Timestamp("2024-01-08 01:00:00+0000", tz="UTC"),
-            pd.Timestamp("2024-01-08 02:00:00+0000", tz="UTC"),
+            pd.Timestamp("2024-01-05 19:00:00"),
+            pd.Timestamp("2024-01-05 20:00:00"),
+            pd.Timestamp("2024-01-05 21:00:00"),
+            pd.Timestamp("2024-01-07 23:00:00"),
+            pd.Timestamp("2024-01-08 00:00:00"),
+            pd.Timestamp("2024-01-08 01:00:00"),
+            pd.Timestamp("2024-01-08 02:00:00"),
         ]
         # Với k=2:
         # Nến 2 có High=2060 > 2050 (nến 0), 2055 (nến 1) và > 2045 (nến 3), 2040 (nến 4) -> Swing High
@@ -147,10 +147,9 @@ class TestSwingsModule(unittest.TestCase):
         k = 2
         swings = detect_swings(df, k=k)
 
-        # 1. Swing High tại nến 2 (Thứ Sáu 21:00 UTC - nến cuối tuần):
-        # Nến 2 + 2 = nến 4 (Thứ Hai 00:00 UTC).
-        # Thời điểm khả dụng PHẢI LÀ lúc nến 4 đóng cửa: Thứ Hai 01:00 UTC!
-        # Tuyệt đối KHÔNG PHẢI là cộng cơ học 3h vào Thứ Sáu (Thứ Bảy 00:00 UTC khi thị trường đóng cửa).
+        # 1. Swing High tại nến 2 (Thứ Sáu 21:00 - nến cuối tuần):
+        # Nến 2 + 2 = nến 4 (Thứ Hai 00:00).
+        # Thời điểm khả dụng PHẢI LÀ lúc nến 4 đóng cửa: Thứ Hai 01:00!
         sw_high = swings[swings["swing_type"] == "HIGH"]
         self.assertEqual(len(sw_high), 1)
         sw_fri = sw_high.iloc[0]
@@ -158,14 +157,14 @@ class TestSwingsModule(unittest.TestCase):
         self.assertEqual(sw_fri["time_candle"], times[2])
         self.assertEqual(
             sw_fri["time_available"],
-            pd.Timestamp("2024-01-08 01:00:00+0000", tz="UTC"),
+            pd.Timestamp("2024-01-08 01:00:00"),
             "Swing trước gap cuối tuần phải chờ nến i+k bên kia gap đóng cửa mới được khả dụng",
         )
 
-        # 2. Swing Low tại nến 4 (Thứ Hai 00:00 UTC - sau khoảng trống cuối tuần):
+        # 2. Swing Low tại nến 4 (Thứ Hai 00:00 - sau khoảng trống cuối tuần):
         # Lân cận trái gồm nến 3 (Chủ Nhật) và nến 2 (Thứ Sáu trước gap).
-        # Nến 4 + 2 = nến 6 (Thứ Hai 02:00 UTC).
-        # Thời điểm khả dụng là lúc nến 6 đóng cửa: Thứ Hai 03:00 UTC.
+        # Nến 4 + 2 = nến 6 (Thứ Hai 02:00).
+        # Thời điểm khả dụng là lúc nến 6 đóng cửa: Thứ Hai 03:00.
         sw_low = swings[swings["swing_type"] == "LOW"]
         self.assertEqual(len(sw_low), 1)
         sw_mon = sw_low.iloc[0]
@@ -173,7 +172,7 @@ class TestSwingsModule(unittest.TestCase):
         self.assertEqual(sw_mon["time_candle"], times[4])
         self.assertEqual(
             sw_mon["time_available"],
-            pd.Timestamp("2024-01-08 03:00:00+0000", tz="UTC"),
+            pd.Timestamp("2024-01-08 03:00:00"),
         )
 
     def test_05_nan_protection_assertion(self):
@@ -261,7 +260,7 @@ class TestSwingsModule(unittest.TestCase):
 
     def test_07_get_swings_available_at(self):
         """7. get_swings_available_at: Lọc chính xác theo thời điểm khả dụng và loại swing."""
-        times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h", tz="UTC")
+        times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h")
         highs = [10.0, 12.0, 15.0, 20.0, 14.0, 11.0, 13.0, 22.0, 16.0, 12.0]
         lows = [8.0, 9.0, 10.0, 11.0, 10.0, 8.0, 9.0, 10.0, 11.0, 10.0]
 
@@ -334,6 +333,36 @@ class TestSwingsModule(unittest.TestCase):
             f"Tỷ lệ ca hòa trên dữ liệu vàng thật ({tie_pct:.2f}%) phải < 2.5%",
         )
 
+    def test_09_timezone_non_utc_conversion(self):
+        """9. Kiểm tra xử lý múi giờ non-UTC: Không bị lệch giờ khi truyền dữ liệu có timezone khác UTC."""
+        # Chuỗi nến có múi giờ Asia/Bangkok (UTC+7)
+        # 07:00 Bangkok = 00:00 UTC
+        times_bkk = pd.date_range("2024-01-02 07:00", periods=5, freq="1h", tz="Asia/Bangkok")
+        highs = [1.0, 2.0, 5.0, 2.0, 1.0]
+        lows = [0.5, 1.0, 1.5, 1.0, 0.5]
+
+        df = pd.DataFrame({"time_utc": times_bkk, "high": highs, "low": lows})
+        swings = detect_swings(df, k=2)
+
+        self.assertEqual(len(swings), 1)
+        sw = swings.iloc[0]
+        # time_candle phải chuẩn hóa về UTC naive: 2024-01-02 02:00:00 (tức 09:00 Bangkok chuyển sang UTC)
+        expected_utc = pd.Timestamp("2024-01-02 02:00:00")
+        self.assertEqual(sw["time_candle"], expected_utc)
+
+        # get_swings_available_at với mốc giờ New York (UTC-5):
+        # 2024-01-02 00:00:00 NY = 2024-01-02 05:00:00 UTC -> Đúng lúc available (times[4] + 1h = 04:00+1h = 05:00 UTC)
+        t_ny = pd.Timestamp("2024-01-02 00:00:00", tz="America/New_York")
+        sw_avail = get_swings_available_at(swings, t_ny)
+        self.assertEqual(len(sw_avail), 1, "Truy vấn bằng timestamp có timezone New York phải tự đổi sang UTC đúng")
+
+    def test_10_missing_columns_precedence_on_empty_df(self):
+        """10. Thứ tự kiểm tra: DataFrame rỗng thiếu cột phải raise KeyError trước."""
+        empty_df_wrong_cols = pd.DataFrame()
+        with self.assertRaises(KeyError):
+            detect_swings(empty_df_wrong_cols, k=2)
+
 
 if __name__ == "__main__":
     unittest.main()
+
