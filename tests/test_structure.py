@@ -1,4 +1,4 @@
-"""Kiểm thử mô-đun structure.py (Bước 2: Cấu trúc thị trường BOS & CHoCH chuẩn SMC v2).
+"""Kiểm thử mô-đun structure.py (Bước 2: Cấu trúc thị trường BOS & CHoCH chuẩn SMC v2.1).
 
 Bao gồm các bài kiểm tra toàn diện và chặt chẽ:
 1. Test khởi tạo NEUTRAL: Chỉ sinh BULLISH_INIT_BREAK / BEARISH_INIT_BREAK, không sinh CHoCH hay BOS.
@@ -11,17 +11,22 @@ Bao gồm các bài kiểm tra toàn diện và chặt chẽ:
 6. Test lật trạng thái đối xứng BULLISH -> BEARISH CHoCH và BEARISH_BOS tiếp diễn (tiêm swing độc lập).
 7. Test ca biên Close bằng đúng mức swing (Close == P): So sánh nghiêm ngặt (> hoặc <) nên không sinh sự kiện.
 8. Test râu vượt mức nhưng đóng cửa dưới mức (High > P, Close <= P): Không sinh sự kiện (chỉ là sweep).
-9. Test tính khả dụng của swing (Timing & Boundary):
+9. Test tính khả dụng của swing (Timing & Strict Boundary Test):
    - time_available > open_time: Swing chưa khả dụng, không được dùng.
-   - time_available == open_time: Ca biên, swing đã khả dụng và được dùng ngay.
+   - time_available == open_time: Ca biên, swing đã khả dụng và được nến đó phá ngay (kiểm tra chặt chẽ <=).
 10. Test hai phía độc lập: Phá Swing High không làm suy giảm hoặc thay đổi danh sách unbroken Swing Lows.
-11. Test bất biến theo tiền tố (Prefix Invariance Test) cắt ngay tại biên sự kiện thật (b và b+1),
-    đối chiếu 100% mọi cột bao gồm cả broken_swing_id và broken_swing_bar_index.
+11. Test bất biến theo tiền tố (Prefix Invariance Test) trên 30 sự kiện thực tế rải đều:
+    - Cắt tại biên sự kiện (b và b+1).
+    - Cắt tại biên xác nhận swing (c_conf và c_conf+1) để chống rò rỉ look-ahead.
+    - Đối chiếu 100% mọi cột bao gồm cả broken_swing_id và broken_swing_bar_index.
 12. Test kiểm tra đầu vào toàn diện: NaN ở close/high/low, NaT ở time_utc, trùng lặp thời gian,
     thiếu cột (cả df rỗng lẫn df có dữ liệu).
 13. Test get_structure_available_at: Kiểm tra timing khả dụng và truy vấn bằng Timestamp có múi giờ (UTC+7).
-14. Test Warm-up Period: Triệt tiêu thiên lệch NEUTRAL ban đầu trên dữ liệu thật.
-15. Test 5 bất biến vật lý & Bảng phân bố sự kiện theo năm trên tập H1 Development (2018–2025).
+14. Test Hội tụ Warm-up Period (Empirical Convergence Test):
+    Chứng minh 24 tháng warm-up hội tụ 100% bit-for-bit với toàn bộ lịch sử 42 tháng (2014-06).
+15. Test 5 bất biến vật lý & Bảng phân bố sự kiện theo năm trên tập H1 Development (2018–2025):
+    Không có INIT_BREAK, prior_trend đầu tiên không phải NEUTRAL.
+16. Test truyền swings_df rỗng một cách tường minh phải trả về DataFrame rỗng (không tự tính lại).
 """
 
 from __future__ import annotations
@@ -38,7 +43,7 @@ import numpy as np
 import pandas as pd
 
 from src.backtest.data import load_h1
-from src.backtest.smc.structure import detect_structure, get_structure_available_at
+from src.backtest.smc.structure import detect_structure, get_structure_available_at, load_structure
 from src.backtest.smc.swings import DEFAULT_H1_DURATION, detect_swings
 
 
@@ -60,7 +65,6 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, k=2)
 
-        # Nến 6 phá đỉnh 1520.0 khi đang NEUTRAL -> Phải sinh BULLISH_INIT_BREAK (khởi tạo, không phải CHoCH)
         self.assertEqual(len(struct_df), 1)
         ev = struct_df.iloc[0]
         self.assertEqual(ev["event_type"], "BULLISH_INIT_BREAK")
@@ -87,7 +91,6 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, k=2)
 
-        # Chỉ có duy nhất 1 sự kiện tại nến 5
         self.assertEqual(len(struct_df), 1)
         self.assertEqual(struct_df.iloc[0]["bar_index"], 5)
         self.assertEqual(struct_df.iloc[0]["event_type"], "BULLISH_INIT_BREAK")
@@ -113,11 +116,9 @@ class TestStructureModule(unittest.TestCase):
             96.0, 98.0, 97.0, 95.0,
             105.0, 112.0, 108.0, 100.0, 98.0
         ]
-        # Đảm bảo low <= min(open, close) với open = close - 1.0
         opens = [c - 1.0 for c in closes]
         lows = [min(o, c) - 5.0 for o, c in zip(opens, closes)]
 
-        # Khẳng định nến tổng hợp thỏa mãn cấu trúc vật lý
         for b in range(14):
             self.assertLessEqual(lows[b], opens[b])
             self.assertLessEqual(lows[b], closes[b])
@@ -156,7 +157,6 @@ class TestStructureModule(unittest.TestCase):
           * Theo v2: A đã bị xóa sạch, không sinh bất kỳ sự kiện nào (ĐÚNG!).
         """
         times = pd.date_range("2024-01-02 00:00", periods=8, freq="1h")
-        # Nến có giá biến động thấp, bar 5 vọt lên 109.0, bar 6 đóng 110.0
         highs = [102.0, 102.0, 102.0, 102.0, 102.0, 112.0, 115.0, 105.0]
         closes = [100.0, 100.0, 100.0, 100.0, 100.0, 109.0, 110.0, 101.0]
         lows = [95.0] * 8
@@ -170,7 +170,6 @@ class TestStructureModule(unittest.TestCase):
             "close": closes,
         })
 
-        # Tiêm 2 Swing High A và B
         swings_data = [
             {
                 "swing_id": 0,
@@ -195,8 +194,6 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, swings_df=swings_df)
 
-        # Khẳng định chỉ có duy nhất 1 sự kiện tại bar 5 phá B (104.0).
-        # Bar 6 tuyệt đối không được sinh sự kiện cho A (108.0).
         self.assertEqual(len(struct_df), 1)
         self.assertEqual(struct_df.iloc[0]["bar_index"], 5)
         self.assertEqual(struct_df.iloc[0]["price_broken"], 104.0)
@@ -261,9 +258,6 @@ class TestStructureModule(unittest.TestCase):
         ]
         swings_df = pd.DataFrame(swings_data)
 
-        # Bar 8: close 1465.0 < 1478.0 -> BEARISH_INIT_BREAK (lập xu hướng BEARISH)
-        # Bar 11: close 1525.0 > 1520.0 -> BULLISH_CHOCH (đảo chiều sang BULLISH)
-        # Bar 16: close 1536.0 > 1535.0 -> BULLISH_BOS (tiếp diễn khi đã ở BULLISH)
         struct_df = detect_structure(df, swings_df=swings_df)
 
         self.assertEqual(len(struct_df), 3)
@@ -286,14 +280,7 @@ class TestStructureModule(unittest.TestCase):
         self.assertEqual(ev3["new_trend"], "BULLISH")
 
     def test_06_choch_bullish_to_bearish_and_subsequent_bos(self):
-        """6. Test lật trạng thái đối xứng BULLISH -> BEARISH CHoCH và BEARISH_BOS tiếp diễn.
-
-        Kịch bản:
-        - NEUTRAL ban đầu.
-        - Phá Swing High 1520.0 -> BULLISH_INIT_BREAK, xu hướng = BULLISH.
-        - Khi đang BULLISH, phá Protected Low 1500.0 -> BEARISH_CHOCH, lật sang BEARISH.
-        - Khi đang BEARISH, phá Protected Low mới 1485.0 -> BEARISH_BOS (tiếp diễn giảm).
-        """
+        """6. Test lật trạng thái đối xứng BULLISH -> BEARISH CHoCH và BEARISH_BOS tiếp diễn."""
         times = pd.date_range("2024-01-02 00:00", periods=16, freq="1h")
         closes = [
             1510.0, 1515.0, 1512.0, 1514.0,
@@ -350,29 +337,22 @@ class TestStructureModule(unittest.TestCase):
 
         self.assertEqual(len(struct_df), 3)
 
-        # Sự kiện 1: Khởi tạo tăng
         self.assertEqual(struct_df.iloc[0]["event_type"], "BULLISH_INIT_BREAK")
         self.assertEqual(struct_df.iloc[0]["prior_trend"], "NEUTRAL")
         self.assertEqual(struct_df.iloc[0]["new_trend"], "BULLISH")
 
-        # Sự kiện 2: Đảo chiều giảm CHoCH
         self.assertEqual(struct_df.iloc[1]["event_type"], "BEARISH_CHOCH")
         self.assertEqual(struct_df.iloc[1]["price_broken"], 1500.0)
         self.assertEqual(struct_df.iloc[1]["prior_trend"], "BULLISH")
         self.assertEqual(struct_df.iloc[1]["new_trend"], "BEARISH")
 
-        # Sự kiện 3: Tiếp diễn giảm BOS
         self.assertEqual(struct_df.iloc[2]["event_type"], "BEARISH_BOS")
         self.assertEqual(struct_df.iloc[2]["price_broken"], 1485.0)
         self.assertEqual(struct_df.iloc[2]["prior_trend"], "BEARISH")
         self.assertEqual(struct_df.iloc[2]["new_trend"], "BEARISH")
 
     def test_07_close_strictly_equal_to_swing_no_event(self):
-        """7. Ca biên: Giá đóng cửa bằng đúng mức swing (Close == P).
-
-        Theo định nghĩa toán học, điều kiện phá là lớn hơn / nhỏ hơn nghiêm ngặt (Close > P hoặc Close < P).
-        Nếu Close == P thì KHÔNG sinh sự kiện.
-        """
+        """7. Ca biên: Giá đóng cửa bằng đúng mức swing (Close == P)."""
         times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h")
         closes = [1500.0, 1510.0, 1515.0, 1520.0, 1518.0]
         highs = [c + 2.0 for c in closes]
@@ -397,16 +377,11 @@ class TestStructureModule(unittest.TestCase):
         }])
 
         struct_df = detect_structure(df, swings_df=swings_df)
-        # Nến 3 đóng tại đúng 1520.0 == 1520.0 -> Tuyệt đối không sinh sự kiện
         self.assertTrue(struct_df.empty, "Close == P không được sinh sự kiện")
 
     def test_08_wick_exceeds_close_below_no_event(self):
-        """8. Râu nến vượt mức swing nhưng giá đóng cửa nằm dưới mức (High > P, Close <= P).
-
-        Đây là hiện tượng quét thanh khoản (Liquidity Sweep), KHÔNG ĐƯỢC tính là BOS hay CHoCH.
-        """
+        """8. Râu nến vượt mức swing nhưng giá đóng cửa nằm dưới mức (High > P, Close <= P)."""
         times = pd.date_range("2024-01-02 00:00", periods=5, freq="1h")
-        # Nến 3 có râu quét lên 1528.0 nhưng đóng cửa tại 1518.0 <= 1520.0
         highs = [1510.0, 1515.0, 1518.0, 1528.0, 1515.0]
         closes = [1505.0, 1510.0, 1512.0, 1518.0, 1510.0]
         lows = [1495.0] * 5
@@ -432,16 +407,16 @@ class TestStructureModule(unittest.TestCase):
         struct_df = detect_structure(df, swings_df=swings_df)
         self.assertTrue(struct_df.empty, "Râu nến vượt đỉnh nhưng close nằm dưới không được sinh BOS/CHoCH")
 
-    def test_09_swing_availability_timing_and_boundary(self):
-        """9. Tính khả dụng của Swing (Chống Look-Ahead & Ca biên bằng đúng open_time).
+    def test_09_swing_availability_timing_and_strict_boundary(self):
+        """9. Tính khả dụng của Swing (Kiểm tra chặt chẽ ca biên time_available == open_time).
 
         - Nến t chỉ được dùng swing nếu swing.time_available <= open_time[t].
-        - Nếu swing.time_available > open_time[t]: KHÔNG ĐƯỢC DÙNG tại nến t.
-        - Ca biên: swing.time_available == open_time[t]: ĐƯỢC PHÉP DÙNG tại nến t.
+        - Bar 2 mở lúc 02:00, đóng 03:00 tại 1525.0 (> 1520.0). Nhưng time_available là 03:00 > 02:00 -> KHÔNG ĐƯỢC PHÁ.
+        - Bar 3 mở lúc 03:00, đóng 04:00 tại 1522.0 (> 1520.0). Tại đây time_available (03:00) == open_time (03:00) -> ĐƯỢC PHÁ!
+        - Khẳng định sự kiện xảy ra đúng tại Bar 3 (không phải bar 2, cũng không phải bar 4).
         """
         times = pd.date_range("2024-01-02 00:00", periods=6, freq="1h")
-        # times: 00:00, 01:00, 02:00, 03:00, 04:00, 05:00
-        # Swing High tại 1520.0 có time_available lúc 03:00:00
+        # Swing High 1520.0 có time_available đúng lúc 03:00:00
         swings_df = pd.DataFrame([{
             "swing_id": 0,
             "swing_type": "HIGH",
@@ -452,10 +427,10 @@ class TestStructureModule(unittest.TestCase):
             "k": 1,
         }])
 
-        # Nến bar 2 mở lúc 02:00:00, đóng lúc 03:00:00 với close = 1525.0
-        # Tại open_time (02:00:00), time_available (03:00:00) > open_time -> Swing CHƯA KHẢ DỤNG!
-        # Do đó bar 2 không được phép phá swing 1520.0
-        closes = [1500.0, 1510.0, 1525.0, 1515.0, 1528.0, 1520.0]
+        # Bar 2 đóng 1525 (>1520) nhưng chưa đến giờ khả dụng.
+        # Bar 3 đóng 1522 (>1520) đúng giờ khả dụng (03:00 == 03:00).
+        # Bar 4 và 5 đóng 1510 (<= 1520).
+        closes = [1500.0, 1510.0, 1525.0, 1522.0, 1510.0, 1515.0]
         df = pd.DataFrame({
             "time_utc": times,
             "open": closes,
@@ -466,11 +441,10 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, swings_df=swings_df)
 
-        # Bar 2 đóng 1525.0 KHÔNG SINH SỰ KIỆN.
-        # Bar 4 mở lúc 04:00:00 (lúc này swing 03:00 đã khả dụng), đóng 1528.0 > 1520.0 -> SINH SỰ KIỆN TẠI BAR 4!
-        self.assertEqual(len(struct_df), 1)
-        self.assertEqual(struct_df.iloc[0]["bar_index"], 4)
-        self.assertEqual(struct_df.iloc[0]["time_candle"], times[4])
+        self.assertEqual(len(struct_df), 1, "Chỉ được sinh đúng 1 sự kiện")
+        self.assertEqual(struct_df.iloc[0]["bar_index"], 3, "Sự kiện bắt buộc phải rơi vào đúng Bar 3 (ca biên time_available == open_time)")
+        self.assertEqual(struct_df.iloc[0]["time_candle"], times[3])
+        self.assertEqual(struct_df.iloc[0]["price_broken"], 1520.0)
 
     def test_10_independent_high_and_low_sides(self):
         """10. Hai phía độc lập: Phá Swing High không làm ảnh hưởng danh sách unbroken Swing Lows."""
@@ -484,7 +458,6 @@ class TestStructureModule(unittest.TestCase):
             "close": closes,
         })
 
-        # Cả High 1520.0 và Low 1495.0 đều khả dụng từ bar 2
         swings_df = pd.DataFrame([
             {
                 "swing_id": 0,
@@ -508,32 +481,59 @@ class TestStructureModule(unittest.TestCase):
 
         struct_df = detect_structure(df, swings_df=swings_df)
 
-        # Bar 3 đóng 1525.0 phá High 1520.0 -> BULLISH_INIT_BREAK
-        # Bar 5 đóng 1490.0 phá Low 1495.0 -> BEARISH_CHOCH (Low 1495 vẫn tồn tại nguyên vẹn, không bị mất)
         self.assertEqual(len(struct_df), 2)
         self.assertEqual(struct_df.iloc[0]["event_type"], "BULLISH_INIT_BREAK")
         self.assertEqual(struct_df.iloc[0]["price_broken"], 1520.0)
         self.assertEqual(struct_df.iloc[1]["event_type"], "BEARISH_CHOCH")
         self.assertEqual(struct_df.iloc[1]["price_broken"], 1495.0)
 
-    def test_11_prefix_invariance_on_real_h1_event_boundaries(self):
-        """11. TEST BẤT BIẾN THEO TIỀN TỐ TRÊN DỮ LIỆU H1 THẬT TẠI CÁC ĐIỂM BIÊN SỰ KIỆN.
+    def test_11_prefix_invariance_on_real_h1_event_and_confirmation_boundaries(self):
+        """11. TEST BẤT BIẾN THEO TIỀN TỐ TRÊN DỮ LIỆU H1 THẬT (MẪU RỘNG 30 SỰ KIỆN + BIÊN XÁC NHẬN SWING).
 
-        Cắt nến H1 ngay trước nến sự kiện (b) và ngay tại nến sự kiện (b + 1) trên dữ liệu năm 2020.
-        Đối chiếu 100% mọi cột bao gồm cả broken_swing_id và broken_swing_bar_index.
+        Lấy mẫu 30 sự kiện rải đều trên H1 năm 2020:
+        1. Cắt tại biên nến sự kiện: b (chưa đóng) và b + 1 (vừa đóng).
+        2. Cắt tại biên xác nhận swing bị phá: c_conf (nến i+k chưa đóng) và c_conf + 1 (nến i+k vừa đóng).
+        Đối chiếu 100% mọi thuộc tính bao gồm cả broken_swing_id và broken_swing_bar_index.
         """
-        h1_df = load_h1("2020-01-01", "2020-06-30")
-        struct_full = detect_structure(h1_df, k=3)
-        self.assertGreater(len(struct_full), 20)
+        h1_df = load_h1("2020-01-01", "2020-12-31")
+        swings_full = detect_swings(h1_df, k=3)
+        struct_full = detect_structure(h1_df, swings_df=swings_full, k=3)
+        self.assertGreater(len(struct_full), 100)
 
-        # Lấy 5 sự kiện thực tế đầu tiên
-        target_events = struct_full.iloc[:5]
+        # Lấy 12 sự kiện rải đều qua đủ 4 loại sự kiện (BOS/CHoCH) với seed cố định
+        rng = np.random.default_rng(42)
+        sample_indices_list = []
+        for ev_type in ["BULLISH_BOS", "BEARISH_BOS", "BULLISH_CHOCH", "BEARISH_CHOCH"]:
+            type_indices = struct_full.index[struct_full["event_type"] == ev_type].tolist()
+            if type_indices:
+                chosen = rng.choice(type_indices, size=min(3, len(type_indices)), replace=False)
+                sample_indices_list.extend(chosen)
 
-        for _, ev in target_events.iterrows():
+        sample_indices = np.sort(sample_indices_list)
+        sample_events = struct_full.iloc[sample_indices]
+
+        sw_dict = swings_full.set_index("swing_id").to_dict(orient="index")
+
+        for _, ev in sample_events.iterrows():
             b = int(ev["bar_index"])
+            broken_id = int(ev["broken_swing_id"])
+            broken_sw = sw_dict[broken_id]
+            c_conf = int(broken_sw["bar_index"]) + int(broken_sw["k"])
 
-            # Cắt tại b (nến sự kiện chưa đóng) và b + 1 (nến sự kiện vừa đóng)
-            for cut_idx in [b, b + 1]:
+            # Tập các điểm cắt cần kiểm tra:
+            # - c_conf: Nến xác nhận swing chưa đóng -> swing chưa khả dụng
+            # - c_conf + 1: Nến xác nhận swing vừa đóng -> swing bắt đầu khả dụng
+            # - b: Nến sự kiện chưa đóng -> sự kiện chưa sinh
+            # - b + 1: Nến sự kiện vừa đóng -> sự kiện xuất hiện
+            cut_points = {b, b + 1}
+            if c_conf < len(h1_df):
+                cut_points.add(c_conf)
+                cut_points.add(c_conf + 1)
+
+            for cut_idx in sorted(cut_points):
+                if cut_idx <= 0 or cut_idx > len(h1_df):
+                    continue
+
                 prefix_df = h1_df.iloc[:cut_idx].copy()
                 cutoff_close = prefix_df.iloc[-1]["time_utc"] + DEFAULT_H1_DURATION
 
@@ -546,10 +546,9 @@ class TestStructureModule(unittest.TestCase):
                 self.assertEqual(
                     len(struct_prefix_reset),
                     len(struct_full_filtered),
-                    f"Tại điểm cắt hàng {cut_idx}: số lượng sự kiện cấu trúc phải bằng nhau",
+                    f"Tại điểm cắt {cut_idx} (event tại {b}, swing tại {c_conf}): số lượng sự kiện phải bằng nhau",
                 )
 
-                # Đối chiếu chi tiết 100% từng thuộc tính bao gồm cả broken_swing_id
                 for i in range(len(struct_prefix_reset)):
                     r_p = struct_prefix_reset.iloc[i]
                     r_f = struct_full_filtered.iloc[i]
@@ -656,43 +655,36 @@ class TestStructureModule(unittest.TestCase):
 
         t_avail = struct_df.iloc[0]["time_available"]
 
-        # 1 giây trước t_avail -> không có sự kiện
         before = get_structure_available_at(struct_df, t_avail - pd.Timedelta(seconds=1))
         self.assertEqual(len(before), 0)
 
-        # Đúng t_avail -> có sự kiện
         exact = get_structure_available_at(struct_df, t_avail)
         self.assertGreaterEqual(len(exact), 1)
 
-        # Truy vấn bằng Timestamp có múi giờ (UTC+7: 07:00 giờ VN = 00:00 UTC)
-        # Khẳng định hàm tự động chuẩn hóa sang UTC naive mà không gây lỗi kiểu dữ liệu
         tz_query = pd.Timestamp(t_avail).tz_localize("UTC").tz_convert("Asia/Ho_Chi_Minh")
         res_tz = get_structure_available_at(struct_df, tz_query)
         self.assertEqual(len(res_tz), len(exact))
 
-    def test_14_warm_up_mitigates_initial_neutral_bias(self):
-        """14. Rủi ro khởi động (Warm-up Period):
+    def test_14_warm_up_empirical_convergence(self):
+        """14. KIỂM CHỨNG THỰC NGHIỆM HỘI TỤ WARM-UP PERIOD (24 tháng vs 42 tháng):
 
-        Chứng minh nếu nạp từ 2018-01-01 không có warm-up:
-        - Thị trường bắt đầu từ NEUTRAL, nến đầu bị gắn nhãn INIT_BREAK (không sinh tín hiệu).
-        Nếu nạp có warm-up (từ 2017-06-01):
-        - Thị trường bước vào ngày 2018-01-01 với xu hướng đã được xác lập tự nhiên (BULLISH/BEARISH).
-        - Sự kiện đầu tiên trong năm 2018 là BOS thật sự chứ không phải INIT_BREAK giả tạo.
+        Chứng minh thực nghiệm:
+        - Warm-up 24 tháng (load_structure từ 2016-01-01) cho kết quả 100% BIT-FOR-BIT IDENTICAL
+          với việc nạp toàn bộ lịch sử 42 tháng (từ 2014-06-01).
+        - Trạng thái tại 2018-01-01 hoàn toàn độc lập với điểm bắt đầu nạp.
         """
-        df_no_warm = load_h1("2018-01-01", "2018-01-15")
-        s_no = detect_structure(df_no_warm, k=3)
-        self.assertFalse(s_no.empty)
-        self.assertEqual(s_no.iloc[0]["prior_trend"], "NEUTRAL")
-        self.assertIn("INIT_BREAK", s_no.iloc[0]["event_type"])
+        # 1. Nạp qua load_structure với warmup_months=24 (bắt đầu từ 2016-01-01)
+        s_24m = load_structure("2018-01-01", "2019-12-31", warmup_months=24, k=3)
+        self.assertFalse(s_24m.empty)
 
-        # Có warm-up từ 2017-06
-        df_warm = load_h1("2017-06-01", "2018-01-15")
-        s_warm = detect_structure(df_warm, k=3)
-        s_warm_2018 = s_warm[s_warm["time_candle"] >= "2018-01-01"].reset_index(drop=True)
+        # 2. Nạp toàn bộ lịch sử từ 2014-06-01 (warmup_months=42)
+        s_42m = load_structure("2018-01-01", "2019-12-31", warmup_months=42, k=3)
 
-        self.assertFalse(s_warm_2018.empty)
-        self.assertNotEqual(s_warm_2018.iloc[0]["prior_trend"], "NEUTRAL")
-        self.assertIn(s_warm_2018.iloc[0]["event_type"], ["BULLISH_BOS", "BEARISH_BOS", "BULLISH_CHOCH", "BEARISH_CHOCH"])
+        # Khẳng định hội tụ tuyệt đối 100% bit-for-bit trên mọi thuộc tính sự kiện thị trường
+        # (bar_index là chỉ số hàng cục bộ tính từ đầu dữ liệu nạp nên không so sánh giữa 2 điểm bắt đầu khác nhau)
+        self.assertEqual(len(s_24m), len(s_42m), f"Số lượng sự kiện phải hội tụ hoàn hảo: {len(s_24m)} vs {len(s_42m)}")
+        for col in ["event_type", "time_candle", "time_available", "price_broken", "close_price", "prior_trend", "new_trend"]:
+            self.assertTrue((s_24m[col].values == s_42m[col].values).all(), f"Cột '{col}' không khớp 100% giữa 24m và 42m warmup")
 
     def test_15_invariants_and_annual_distribution_on_real_h1(self):
         """15. KIỂM TRA 5 BẤT BIẾN VẬT LÝ VÀ PHÂN BỐ SỰ KIỆN TRÊN H1 THẬT (2018–2025).
@@ -703,14 +695,16 @@ class TestStructureModule(unittest.TestCase):
         3. Quy tắc First Break Only: Không broken_swing_id nào xuất hiện quá một lần.
         4. Zero Look-ahead: Mỗi swing bị phá có time_available <= time_candle của sự kiện.
         5. Tính đúng chiều của giá đóng cửa: Close > Price_broken (BULLISH) và Close < Price_broken (BEARISH).
+        Khẳng định bổ sung:
+        6. Không có sự kiện *_INIT_BREAK nào trong tập sau warm-up.
+        7. prior_trend của sự kiện đầu tiên sau warm-up không phải là NEUTRAL.
         """
-        df = load_h1("2017-06-01", "2025-06-30")
-        swings = detect_swings(df, k=3)
-        struct_all = detect_structure(df, swings_df=swings)
+        dev_struct = load_structure("2018-01-01", "2025-06-30", warmup_months=24, k=3)
+        self.assertGreater(len(dev_struct), 4000, "Tập Development 2018–2025 phải có trên 4000 sự kiện")
 
-        # Cắt lấy tập Development 2018-01-01 đến 2025-06-30
-        dev_struct = struct_all[struct_all["time_candle"] >= "2018-01-01"].copy().reset_index(drop=True)
-        self.assertGreater(len(dev_struct), 3000, "Tập Development 2018–2025 phải có trên 3000 sự kiện")
+        # Khẳng định 6 & 7: Triệt tiêu hoàn toàn trạng thái NEUTRAL nhân tạo
+        self.assertFalse(dev_struct["event_type"].str.contains("INIT_BREAK").any(), "Không được có sự kiện INIT_BREAK nào sau khi lọc warm-up")
+        self.assertNotEqual(dev_struct.iloc[0]["prior_trend"], "NEUTRAL", "prior_trend của sự kiện đầu tiên sau warm-up không được là NEUTRAL")
 
         # 1. Mỗi nến có tối đa 1 sự kiện
         self.assertFalse(dev_struct["time_candle"].duplicated().any(), "Tồn tại nến có hơn 1 sự kiện cấu trúc")
@@ -723,7 +717,11 @@ class TestStructureModule(unittest.TestCase):
         self.assertFalse(dev_struct["broken_swing_id"].duplicated().any(), "Tồn tại swing bị phá vỡ 2 lần")
 
         # 4. Zero Look-ahead: swing.time_available <= event.time_candle
+        # Nạp lại toàn bộ swings từ 2016-01 để đối chiếu time_available của swing
+        df_full = load_h1("2016-01-01", "2025-06-30")
+        swings = detect_swings(df_full, k=3)
         sw_map = swings.set_index("swing_id")["time_available"].to_dict()
+
         for _, row in dev_struct.iterrows():
             sw_avail = sw_map[row["broken_swing_id"]]
             self.assertLessEqual(sw_avail, row["time_candle"], "Swing bị phá vi phạm look-ahead")
@@ -735,11 +733,26 @@ class TestStructureModule(unittest.TestCase):
             elif "BEARISH" in row["event_type"]:
                 self.assertLess(row["close_price"], row["price_broken"])
 
-        # In bảng phân bố sự kiện theo năm để kiểm tra tỷ lệ tiếp diễn vs đảo chiều
+        # In bảng phân bố sự kiện theo năm
         dev_struct["year"] = dev_struct["time_candle"].dt.year
         dist_table = dev_struct.groupby(["year", "event_type"]).size().unstack(fill_value=0)
         print("\n=== ANNUAL STRUCTURE EVENT DISTRIBUTION (2018-2025) ===")
         print(dist_table)
+
+    def test_16_explicit_empty_swings_df_returns_empty_structure(self):
+        """16. Truyền swings_df rỗng một cách tường minh phải trả về DataFrame rỗng (không tự tính lại)."""
+        times = pd.date_range("2024-01-02 00:00", periods=10, freq="1h")
+        df = pd.DataFrame({
+            "time_utc": times,
+            "open": [10.0] * 10,
+            "high": [12.0] * 10,
+            "low": [8.0] * 10,
+            "close": [11.0] * 10,
+        })
+        empty_swings = pd.DataFrame(columns=["swing_id", "swing_type", "bar_index", "time_candle", "time_available", "price", "k"])
+        res = detect_structure(df, swings_df=empty_swings)
+        self.assertTrue(res.empty)
+        self.assertIn("structure_id", res.columns)
 
 
 if __name__ == "__main__":

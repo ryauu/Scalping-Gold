@@ -112,7 +112,7 @@ def detect_structure(
     n_bars = len(sorted_df)
 
     # Phát hiện swings nếu chưa có
-    if swings_df is None or swings_df.empty:
+    if swings_df is None:
         swings = detect_swings(sorted_df, k=k, bar_duration=bar_duration)
     else:
         swings = swings_df.copy()
@@ -300,3 +300,52 @@ def get_structure_available_at(
         mask = mask & (structure_df["event_type"] == event_type.strip().upper())
 
     return structure_df[mask].copy().reset_index(drop=True)
+
+
+def load_structure(
+    start_date: str,
+    end_date: str,
+    warmup_months: int = 24,
+    k: int = DEFAULT_K,
+    bar_duration: pd.Timedelta = DEFAULT_H1_DURATION,
+) -> pd.DataFrame:
+    """Nạp dữ liệu H1 kèm giai đoạn khởi động (warm-up) và phát hiện cấu trúc chuẩn SMC.
+
+    Tự động đảm bảo quy tắc warm-up để triệt tiêu ảnh hưởng của trạng thái ban đầu NEUTRAL:
+    1. Nạp nến H1 từ start_date lùi về trước warmup_months (mặc định 24 tháng để hội tụ 100%).
+    2. Tính toán liên tục Swings và Cấu trúc thị trường trên toàn bộ dải dữ liệu [warmup_start, end_date].
+    3. Lọc lấy các sự kiện cấu trúc có time_available >= start_date (chuẩn UTC naive).
+
+    Tham số:
+        start_date: Ngày bắt đầu lấy tín hiệu (chuỗi 'YYYY-MM-DD').
+        end_date: Ngày kết thúc (chuỗi 'YYYY-MM-DD').
+        warmup_months: Số tháng khởi động nạp trước start_date (mặc định 24 tháng).
+        k: Tham số k phát hiện swing (mặc định PRIMARY k=3).
+        bar_duration: Độ dài nến (mặc định 1 giờ đối với H1).
+
+    Trả về:
+        DataFrame các sự kiện cấu trúc có time_available >= start_date.
+    """
+    from ..data import load_h1
+
+    ts_start = pd.to_datetime(start_date)
+    ts_warmup = ts_start - pd.DateOffset(months=warmup_months)
+    warmup_start_str = ts_warmup.strftime("%Y-%m-%d")
+
+    df_h1 = load_h1(warmup_start_str, end_date)
+    struct_all = detect_structure(df_h1, k=k, bar_duration=bar_duration)
+
+    if struct_all.empty:
+        return struct_all
+
+    start_utc = pd.to_datetime(start_date)
+    if start_utc.tzinfo is not None:
+        start_utc = start_utc.tz_convert("UTC").tz_localize(None)
+
+    avail_series = pd.to_datetime(struct_all["time_available"])
+    if avail_series.dt.tz is not None:
+        avail_series = avail_series.dt.tz_convert("UTC").dt.tz_localize(None)
+
+    mask = avail_series >= start_utc
+    return struct_all[mask].copy().reset_index(drop=True)
+
