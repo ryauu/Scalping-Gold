@@ -1,6 +1,6 @@
 """Mô-đun structure.py - Phát hiện Cấu trúc thị trường SMC (BOS & CHoCH).
 
-Định nghĩa toán học và quy tắc vận hành (theo SMC_SPEC.md v2 mục 3):
+Định nghĩa toán học và quy tắc vận hành (theo SMC_SPEC.md v2.2 mục 3):
 1. Trạng thái cấu trúc thị trường (Market Trend State):
    - 'NEUTRAL': Trạng thái khởi tạo ban đầu khi chưa ghi nhận bất kỳ sự kiện phá vỡ nào.
    - 'BULLISH': Cấu trúc tăng giá (sau khi có Bullish Init Break, Bullish BOS hoặc Bullish CHoCH).

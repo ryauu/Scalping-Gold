@@ -1,9 +1,9 @@
 # SMC_SPEC.md — Đặc tả kỹ thuật các thành phần Smart Money Concepts (SMC)
 
-**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.1 (Tag: `smc-spec-v2.1`)**  
-*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.1 là việc chuẩn hóa toán học, khép kín các trường hợp biên và kiểm chứng thực nghiệm độc lập TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
+**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.2 (Tag: `smc-spec-v2.2`)**  
+*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.2 là việc chuẩn hóa toán học, khép kín các trường hợp biên và kiểm chứng thực nghiệm độc lập TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
 
-### Nhật ký hiệu chỉnh từ v1 sang v2.1 (Changelog):
+### Nhật ký hiệu chỉnh từ v1 sang v2.2 (Changelog):
 - **V2-1 (Khởi tạo xu hướng từ NEUTRAL):** Đổi tên sự kiện phá vỡ đầu tiên từ `NEUTRAL` thành `BULLISH_INIT_BREAK` / `BEARISH_INIT_BREAK` thay vì gọi là BOS. Khẳng định đây là sự kiện khởi tạo xu hướng, không dùng làm tín hiệu giao dịch tiếp diễn.
 - **V2-2 (Định nghĩa "Gần nhất" của Protected Level):** Quy định rõ ràng là gần nhất theo thời gian (`time_available`), với `bar_index` làm tie-breaker, loại bỏ cách hiểu theo mức giá.
 - **V2-3 (Vòng đời FVG):** Sự kiện `TESTED` chỉ ghi nhận đúng 1 lần duy nhất (First Touch Only); xác lập thứ tự ưu tiên dứt điểm: `INVALIDATED` > `TESTED` > `EXPIRED`.
@@ -12,7 +12,8 @@
 - **V2-6 (Đăng ký quy tắc thoát lệnh SMC):** Đăng ký chính thức tỷ lệ R:R = 1:2 ($TP = Entry \pm 2 \cdot R_{dist}$) và kiểm soát ngẫu nhiên đối chứng C4.
 - **V2-7 (Bảng tần suất sự kiện theo năm):** Bổ sung bảng số liệu thực nghiệm đầy đủ 2018–2025 trên H1 Development ($k=3$ và $k=5$).
 - **V2-8 (Quy tắc che khuất v2 - Max Rule):** Chuyển điều kiện xóa swing sang $\le \max(P, Close[t])$ (với High) và $\ge \min(P, Close[t])$ (với Low) để triệt tiêu BOS ma khi nến đóng vượt mức swing mới nhưng mức swing cũ cao hơn vẫn chưa bị phá.
-- **V2-9 (Chuẩn hóa Warm-up Period 24 tháng & Hàm load_structure):** Kiểm chứng thực nghiệm chứng minh warm-up 24 tháng (nạp từ `2016-01-01`) hội tụ 100% bit-for-bit với toàn bộ 42 tháng lịch sử (từ `2014-06-01`) trên toàn bộ 4.486 sự kiện cấu trúc 2018–2025. Chuẩn hóa lọc sự kiện theo $time\_available \ge T_{\text{start}}$ (thay vì $time\_candle$) để bảo toàn nến 23:00 đóng cửa đúng 00:00 ngày bắt đầu.
+- **V2-9 (Chuẩn hóa Warm-up Period & Hàm load_structure mặc định toàn bộ lịch sử):** Kiểm chứng thực nghiệm chứng minh warm-up 24 tháng (nạp từ `2016-01-01`) hội tụ trùng khớp hoàn hảo 100% trên mọi thuộc tính sự kiện thị trường với toàn bộ lịch sử (từ `2014-06-01`) trên toàn bộ 4.486 sự kiện cấu trúc 2018–2025. Chuẩn hóa quy tắc mặc định nạp toàn bộ lịch sử trước $T_{\text{start}}$ (`warmup_months=None`), lọc sự kiện theo $time\_available \ge T_{\text{start}}$ (thay vì $time\_candle$) để bảo toàn nến 23:00 đóng cửa đúng 00:00 ngày bắt đầu, và ghi chú rõ `bar_index`, `structure_id` chỉ có ý nghĩa cục bộ.
+- **V2-10 (Đóng băng đặc tả FVG & Vòng đời v2.2):** Chuẩn hóa quy tắc khoảng trống cuối tuần & giờ nghỉ hàng ngày (`spans_gap`), bộ lọc tối thiểu $\gamma \cdot ATR(H1, 14)_{[i-1]}$ không look-ahead, vòng đời 3 sự kiện (`TESTED`, `INVALIDATED`, `EXPIRED`) với quy tắc ưu tiên nghiêm ngặt, chuẩn hóa $time\_available = close\_time[j]$ cho từng sự kiện vòng đời, và làm rõ điều kiện chuyển tiếp nến $i+M+1$ nếu chưa bị `INVALIDATED`.
 
 ---
 
@@ -107,10 +108,10 @@ Tại mỗi nến H1 $t$, việc kiểm tra phá vỡ được đối chiếu v�
 ### 3.4. Quy tắc khởi động (Warm-up Period Rule) & Bằng chứng hội tụ thực nghiệm
 - **Vấn đề rủi ro khởi động:** Thuật toán cấu trúc thị trường luôn khởi tạo ở trạng thái `NEUTRAL`. Nếu nạp dữ liệu bắt đầu đúng ngày đầu tiên của giai đoạn phân tích (ví dụ `2018-01-01`), những nến đầu tiên hoàn toàn chưa có swing nào khả dụng (do cần tối thiểu $2k+1$ nến và độ trễ xác nhận $k$ nến). Khi mức swing đầu tiên bị phá vỡ, sự kiện đó bị gắn nhãn `INIT_BREAK` và bị bỏ qua không tạo tín hiệu, đồng thời trạng thái xu hướng trong những ngày đầu tháng 01/2018 bị sai lệch so với diễn biến tự nhiên của thị trường. Hơn nữa, danh sách các swing chưa bị phá từ quá khứ quyết định mức nào là Protected Level hiện tại; ký ức cấu trúc có thể kéo dài trên 3 năm (thực nghiệm cho thấy Swing High 1374.99 từ năm 2016 vẫn chi phối đến tận ngày 20/06/2019).
 - **Bằng chứng hội tụ thực nghiệm (Warm-up Convergence Proof):**
-  Thử nghiệm đối chứng trên dữ liệu H1 thật với các độ dài warm-up khác nhau cho giai đoạn đánh giá 2018–2025 (khi ghép từng sự kiện theo `time_available` và `event_type`):
-  - Khởi động 6 tháng (từ `2017-06-01`): Khớp thực sự 99,889% (4.481/4.486 sự kiện trùng khớp hoàn toàn), chỉ lệch 5 sự kiện do thiếu các swing hình thành từ đầu năm 2017.
-  - Khởi động 12 tháng (từ `2017-01-01`): Khớp thực sự 99,978% (4.485/4.486 sự kiện trùng khớp hoàn toàn), chỉ lệch đúng 1 sự kiện duy nhất vào ngày 20/06/2019 do ảnh hưởng của đỉnh swing 1374.99 từ năm 2016.
-  - **Khởi động 24 tháng (từ `2016-01-01`) so với Toàn bộ lịch sử 42 tháng (từ `2014-06-01`): TRÙNG KHỚP HOÀN HẢO 100% TRÊN MỌI THUỘC TÍNH THỊ TRƯỜNG** trên toàn bộ 4.486 sự kiện cấu trúc của cả giai đoạn 2018–2025 (`time_candle`, `time_available`, `event_type`, `price_broken`, `close_price`, `prior_trend`, `new_trend`). Toàn bộ các swing cũ từ 2014–2015 đều đã bị phá vỡ hoặc che khuất trong các biến động lớn của năm 2015, khiến trạng thái tại 2018-01-01 hoàn toàn độc lập với điểm bắt đầu trước đó.
+  Thử nghiệm đối chứng trên dữ liệu H1 thật với các độ dài warm-up khác nhau cho giai đoạn đánh giá 2018–2025 (khi ghép từng sự kiện theo bộ 3 khóa nghiêm ngặt `["time_available", "event_type", "price_broken"]` để không ghép nhầm swing):
+  - Khởi động 6 tháng (từ `2017-06-01`): Sinh ra đúng 4.481 sự kiện, ghép trùng khớp 100% cả 4.481 sự kiện với bảng chuẩn (đạt tỷ lệ 4.481/4.486 = 99,889%), thiếu đúng 5 sự kiện (4 sự kiện phá đáy cũ trong tháng 08/2018 và 1 sự kiện phá đỉnh cũ vào tháng 06/2019).
+  - Khởi động 12 tháng (từ `2017-01-01`): Sinh ra đúng 4.485 sự kiện, ghép trùng khớp 100% cả 4.485 sự kiện với bảng chuẩn (đạt tỷ lệ 4.485/4.486 = 99,978%), thiếu đúng 1 sự kiện duy nhất vào ngày 20/06/2019 do ảnh hưởng của đỉnh swing 1374.99 từ năm 2016.
+  - **Khởi động 24 tháng (từ `2016-01-01`) so với Toàn bộ lịch sử (từ đầu kho DuckDB `2014-06-01`): TRÙNG KHỚP HOÀN HẢO 100% TRÊN MỌI THUỘC TÍNH THỊ TRƯỜNG** trên toàn bộ 4.486 sự kiện cấu trúc của cả giai đoạn 2018–2025 (`time_candle`, `time_available`, `event_type`, `price_broken`, `close_price`, `prior_trend`, `new_trend`). Trạng thái thị trường tại 2018-01-01 hoàn toàn ổn định và độc lập với điểm bắt đầu trước đó.
 - **Quy tắc chuẩn hóa chính thức (Mặc định toàn bộ lịch sử):**
   1. **Quy tắc chính:** Với mọi khoảng thời gian đánh giá $[T_{\text{start}}, T_{\text{end}}]$, mặc định **NẠP TOÀN BỘ LỊCH SỬ CÓ TRƯỚC $T_{\text{start}}$** từ đầu kho dữ liệu DuckDB (`warmup_months=None`). Vì việc nạp toàn bộ lịch sử (~100k nến H1 từ năm 2014) chỉ tốn chưa tới 1 giây và phát hiện cấu trúc chỉ tốn ~4 giây, đây là giải pháp 0 bậc tự do hoàn hảo nhất, đảm bảo tính nhất quán tuyệt đối cho cả Development, Robustness và Holdout mà không cần chạm vào dữ liệu để dò tìm thời gian hội tụ.
   2. Thời lượng 24 tháng chỉ là bằng chứng thực nghiệm tối thiểu cho tập Development.
@@ -122,41 +123,64 @@ Tại mỗi nến H1 $t$, việc kiểm tra phá vỡ được đối chiếu v�
 
 ## 4. Fair Value Gap (FVG) & Nhật ký vòng đời (`src/backtest/smc/fvg.py`)
 
-### 4.1. Định nghĩa hình học 3 nến liên tiếp & Quy ước mép
+### 4.1. Định nghĩa hình học 3 nến liên tiếp & Quyết định khoảng trống cuối tuần (Spans Gap Rule)
 Xét bộ 3 nến H1 liên tiếp tại chỉ số $[i-2, i-1, i]$:
 - **Bullish FVG (Khoảng trống giá tăng):**
-  Điều kiện: $Low[i] > High[i-2]$.
+  Điều kiện nghiêm ngặt: $Low[i] > High[i-2]$ (ca bằng nhau $Low[i] = High[i-2]$ tuyệt đối KHÔNG phải FVG).
   - **Mép gần (Near edge / Entry threshold):** $\text{top} = Low[i]$. Khi giá quay đầu hồi quy (pullback) giảm từ trên xuống, đây là mức giá đầu tiên chạm vào vùng gap.
   - **Mép xa (Far edge / Invalidation threshold):** $\text{bottom} = High[i-2]$. Nếu giá đóng cửa xuyên thủng mép này, vùng mất cân bằng bị xóa bỏ hoàn toàn.
 - **Bearish FVG (Khoảng trống giá giảm):**
-  Điều kiện: $High[i] < Low[i-2]$.
+  Điều kiện nghiêm ngặt: $High[i] < Low[i-2]$ (ca bằng nhau $High[i] = Low[i-2]$ tuyệt đối KHÔNG phải FVG).
   - **Mép gần (Near edge / Entry threshold):** $\text{bottom} = High[i]$. Khi giá quay đầu hồi quy tăng từ dưới lên, đây là mức giá đầu tiên chạm vào vùng gap.
   - **Mép xa (Far edge / Invalidation threshold):** $\text{top} = Low[i-2]$. Nếu giá đóng cửa vượt lên trên mép này, vùng mất cân bằng bị vô hiệu.
+- **Quyết định tiên nghiệm về khoảng trống cuối tuần & giờ nghỉ hàng ngày (Weekend/Holiday & Daily Maintenance Gap Decision - Spec v2.2):**
+  - *Bản chất vi mô:* FVG đại diện cho sự mất cân bằng cung-cầu trong phiên đấu giá liên tục (continuous auction orderflow). Bước nhảy mở cửa qua 48h đóng sàn cuối tuần (auction reopening jump) hoặc qua 1 giờ nghỉ kỹ thuật hàng ngày (daily maintenance break, thường vào 21:00–22:00 hoặc 22:00–23:00 UTC theo quy ước của thị trường GOLD) không phải là sự mất cân bằng thanh khoản nội phiên.
+  - *Quy tắc thuật toán:* Kiểm tra khoảng cách thời gian giữa 2 hàng liên tiếp trong bộ ba:
+    $$\Delta t_1 = time\_utc[i-1] - time\_utc[i-2] \quad , \quad \Delta t_2 = time\_utc[i] - time\_utc[i-1]$$
+    Nếu $\Delta t_1 > bar\_duration$ hoặc $\Delta t_2 > bar\_duration$ (với H1 là $> 1\text{ hour}$): Gán cờ **`spans_gap = True`** (bao gồm cả vắt qua cuối tuần, vắt qua giờ nghỉ bảo trì hàng ngày hoặc nến thiếu dữ liệu).
+    Nếu bộ 3 nến hoàn toàn liền mạch liên tục ($\Delta t_1 \le 1\text{h}$ và $\Delta t_2 \le 1\text{h}$): Gán cờ **`spans_gap = False`**.
+  - *Quy chuẩn áp dụng:* Bảng đầu ra lưu trữ cờ `spans_gap` minh bạch cho từng FVG. Trong quy chuẩn chiến lược SMC PRIMARY, **chỉ các FVG có `spans_gap == False` mới được công nhận là FVG giao dịch hợp lệ**. Các FVG có `spans_gap == True` bị loại khỏi luồng tín hiệu vào lệnh.
 
-### 4.2. Bộ lọc kích thước tối thiểu
-Để loại bỏ các vi khoảng trống nhiễu (vài cents):
+### 4.2. Bộ lọc kích thước tối thiểu & Chống rò rỉ Look-Ahead với ATR
+Để loại bỏ các vi khoảng trống nhiễu:
 $$\text{gap\_size} = |\text{top} - \text{bottom}| \ge \gamma \times ATR(H1, 14)_{[i-1]}$$
-- **Quy tắc không look-ahead của ATR:** $ATR(H1, 14)_{[i-1]}$ bắt buộc là giá trị ATR tính đến hết nến $i-1$ (tại thời điểm đóng nến $i-1$, hoàn toàn thuộc về quá khứ, không chứa dữ liệu nến $i$).
-- **Tham số:** **PRIMARY $\gamma = 0,15$** (tối thiểu 15% ATR H1). EXPLORATORY: $\gamma = 0,25$.
+- **Quy tắc tuyệt đối chống look-ahead của ATR:**  
+  Chỉ số $ATR(H1, 14)$ tại hàng $i$ trong `data.py` vốn được tính từ $High[i], Low[i], Close[i]$. Do đó, giá trị tham chiếu bắt buộc phải lấy ở hàng **$i-1$** ($ATR[i-1]$), tức giá trị ATR đã chốt khi nến $i-1$ đóng cửa, hoàn toàn độc lập với nến $i$. Thay đổi $High[i]$ hay $Low[i]$ của nến $i$ tuyệt đối không làm thay đổi $ATR[i-1]$.
+- **Khởi động ATR:** Bỏ qua các nến chưa có giá trị ATR (14 nến đầu tiên, tức các nến có $ATR[i-1] = \text{NaN}$).
+- **Tham số:** **PRIMARY $\gamma = 0,15$** (tối thiểu 15% ATR H1). EXPLORATORY: $\gamma = 0,25$. Dấu so sánh là $\ge$ (bằng đúng $\gamma \times ATR$ vẫn được giữ).
 
-### 4.3. Nhật ký vòng đời bất biến & Thứ tự ưu tiên sự kiện
-1. `CREATED`: Được tạo khi nến $i$ đóng cửa ($\text{time\_available} = \text{close\_time}[i]$).
-   - **Quy tắc nến test:** Nến test bắt buộc phải có chỉ số $j > i$. **Nến $i$ (nến hoàn thành tạo FVG) tuyệt đối KHÔNG ĐƯỢC tính là nến test FVG do chính nó tạo ra.**
-2. `TESTED` (Chạm mép gần):
-   - **Quy tắc ghi nhận duy nhất (First Touch Only):** Sự kiện `TESTED` **CHỈ GHI NHẬN ĐÚNG 1 LẦN DUY NHẤT** khi nến $j > i$ lần đầu tiên chạm vào mép gần:
-     - Bullish FVG: $Low[j] \le \text{top}$ và $Close[j] \ge \text{bottom}$.
-     - Bearish FVG: $High[j] \ge \text{bottom}$ và $Close[j] \le \text{top}$.
-   - **Hiệu lực sau khi TESTED:** FVG ở trạng thái `TESTED` **VẪN TIẾP TỤC CÒN HIỆU LỰC (active)** cho các tín hiệu vào lệnh (ví dụ tìm phản ứng bật lại từ FVG), cho đến khi bị `INVALIDATED` hoặc `EXPIRED`.
-3. `INVALIDATED` (Vô hiệu hóa): Nến $j > i$ có giá ĐÓNG CỬA xuyên thủng mép xa:
-   - Bullish FVG: $Close[j] < \text{bottom}$.
-   - Bearish FVG: $Close[j] > \text{top}$.
-   - FVG chuyển sang trạng thái kết thúc (inactive), không còn hiệu lực.
-4. `EXPIRED` (Hết hạn): Áp dụng cho cả FVG chưa test lẫn FVG đã `TESTED` nếu thời gian tồn tại vượt quá $M$ nến H1 ($j - i \ge M$) mà chưa bị `INVALIDATED`.
-   - **Tham số:** **PRIMARY $M = 24$ nến** (1 ngày giao dịch). EXPLORATORY: $M = 48$ nến.
-5. **Thứ tự ưu tiên giải quyết xung đột cùng nến:**
+### 4.3. Bảng FVG & Nhật ký vòng đời bất biến
+Mỗi FVG được ghi nhận trong bảng `fvg_df` với các cột:
+- `fvg_id`: int (tăng dần từ 0)
+- `direction`: str ('BULLISH' / 'BEARISH')
+- `bar_index`: int (chỉ số nến $i$ tạo FVG)
+- `time_candle`: pd.Timestamp (giờ mở nến $i$)
+- `time_available`: pd.Timestamp (giờ đóng nến $i$: $time\_utc[i] + bar\_duration$)
+- `top`: float, `bottom`: float
+- `near_edge`: float, `far_edge`: float
+- `gap_size`: float, `atr_ref`: float ($ATR[i-1]$)
+- `spans_gap`: bool
+
+Nhật ký vòng đời `lifecycle_df` theo dõi trạng thái bằng thuật toán quét tiến $j = i+1, i+2, \dots$:
+1. **Sự kiện `CREATED`:** Ghi nhận tại nến $i$ với $\text{time\_available} = \text{close\_time}[i] = time\_utc[i] + bar\_duration$.
+   - **Quy tắc nến test:** Nến test bắt buộc có $j > i$. Nến $i$ tuyệt đối **KHÔNG TỰ TEST CHÍNH FVG NÓ TẠO RA**.
+2. **Thứ tự kiểm tra nghiêm ngặt tại mỗi nến tương lai $j \ge i+1$:**
+   - **Bước 1 — Invalidation (Đóng cửa xuyên mép xa):**
+     - Bullish FVG: $Close[j] < \text{bottom}$.
+     - Bearish FVG: $Close[j] > \text{top}$.
+     - Nếu thỏa: Ghi nhận sự kiện `INVALIDATED` tại nến $j$ với $\text{price\_trigger} = Close[j]$, $\text{time\_available} = \text{close\_time}[j] = time\_utc[j] + bar\_duration$, và **LẬP TỨC DỪNG THEO DÕI FVG NÀY**.
+   - **Bước 2 — Touch / Test (Chạm mép gần):**
+     - Bullish FVG: $Low[j] \le \text{top}$ (và chưa từng bị ghi TESTED trước đó).
+     - Bearish FVG: $High[j] \ge \text{bottom}$ (và chưa từng bị ghi TESTED trước đó).
+     - Nếu thỏa: Ghi nhận sự kiện `TESTED` tại nến $j$ với $\text{price\_trigger} = \text{near\_edge}$, $\text{time\_available} = \text{close\_time}[j] = time\_utc[j] + bar\_duration$. **CHỈ GHI TESTED ĐÚNG 1 LẦN DUY NHẤT**. Sau khi TESTED, FVG vẫn tiếp tục ACTIVE theo dõi các nến tiếp theo.
+   - **Bước 3 — Expiration (Hết hạn sau $M$ nến):**
+     - Khi $j - i \ge M$ và chưa bị `INVALIDATED`:
+       - Nếu tại chính nến $j = i+M$ vừa ghi nhận `TESTED` (chạm mép gần ở nến thứ $M$): `TESTED` được ghi tại nến $i+M$, và `EXPIRED` sẽ được ghi nhận tại nến kế tiếp **$i+M+1$** (với $\text{time\_available} = \text{close\_time}[i+M+1]$, nếu nến này có dữ liệu và **chưa bị `INVALIDATED` ở nến đó**).
+       - Trong mọi trường hợp khác ($j = i+M$ không chạm, hoặc đã TESTED từ nến trước đó): Ghi nhận `EXPIRED` tại nến **$i+M$** với $\text{time\_available} = \text{close\_time}[i+M]$ (nếu chưa bị `INVALIDATED` ở nến đó), sau đó dừng theo dõi FVG này.
+3. **Thứ tự ưu tiên khi xung đột cùng nến:**
    $$\mathbf{INVALIDATED} > \mathbf{TESTED} > \mathbf{EXPIRED}$$
-   - Nếu trong cùng một nến $j$, giá vừa chạm mép gần vừa đóng cửa xuyên mép xa $\implies$ Ưu tiên `INVALIDATED`, FVG đóng ngay lập tức.
-   - Nếu nến $j$ là nến thứ $M$, mà trong nến $j$ giá chạm mép gần $\implies$ Ưu tiên `TESTED` (chuyển sang trạng thái đã test), không ghi `EXPIRED` tại nến đó. Nếu không chạm mép gần, ghi nhận `EXPIRED`.
+   Nếu một nến vừa chạm mép gần vừa đóng cửa xuyên mép xa $\implies$ Chỉ ghi nhận duy nhất `INVALIDATED`.
+4. **Tham số vòng đời:** **PRIMARY $M = 24$ nến** (1 ngày giao dịch). EXPLORATORY: $M = 48$ nến. Độ phức tạp $O(N_{\text{FVG}} \times M)$ tối ưu, duyệt tiến siêu tốc.
 
 ---
 
@@ -288,7 +312,7 @@ Thống kê thực nghiệm từ 44.224 nến H1 thuần của tập Development
 *Nhận xét:* Tần suất xuất hiện swing ổn định qua từng năm (~1.140 swing/năm đối với $k=3$, ~725 swing/năm đối với $k=5$). Tỷ lệ ca hòa trên dữ liệu giá vàng thật chỉ chiếm $1,73\%$. Số lượng swing là dồi dào, tuy nhiên số lượng lệnh SMC thực tế sẽ phụ thuộc vào các điều kiện hợp lưu và bộ lọc tiếp theo (FVG, Sweeps, và đặc biệt là ràng buộc sàn chi phí $R_{dist}$).
 
 ### 10.3. Bảng phân bố sự kiện cấu trúc theo năm trên H1 Development (2018–2025)
-Thống kê thực nghiệm từ 4.486 sự kiện cấu trúc (`load_structure("2018-01-01", "2025-06-30", warmup_months=24, k=3)`):
+Thống kê thực nghiệm từ 4.486 sự kiện cấu trúc (`load_structure("2018-01-01", "2025-06-30", warmup_months=None, k=3)`):
 
 | Năm | BEARISH_BOS | BEARISH_CHOCH | BULLISH_BOS | BULLISH_CHOCH | Tổng sự kiện cấu trúc |
 | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -303,8 +327,8 @@ Thống kê thực nghiệm từ 4.486 sự kiện cấu trúc (`load_structure(
 | **TỔNG CỘNG** | **1.322** | **773** | **1.618** | **773** | **4.486** |
 
 *Đặc tính định lượng & 5 Bất biến vật lý đã được chứng minh 100%:*
-1. **Không có bất kỳ sự kiện INIT_BREAK nào:** Quy tắc warm-up nạp toàn bộ lịch sử (hoặc tối thiểu 24 tháng) đã loại bỏ hoàn toàn sự kiện khởi tạo nhân tạo; xu hướng mở đầu năm 2018 là `BULLISH` tự nhiên đã được kiểm chứng thực nghiệm (kế thừa từ sự kiện `BULLISH_BOS` ngày 29/12/2017 và mở đầu bằng `BULLISH_BOS` phá đỉnh 1307.41 lúc 07:00 ngày 02/01/2018).
-2. **Tính đối xứng luân phiên hoàn hảo của CHoCH:** $N_{\text{BULLISH\_CHOCH}} = 773$ và $N_{\text{BEARISH\_CHOCH}} = 773$ bằng nhau chằn chặt qua toàn bộ 7.5 năm. Đây là hệ quả cấu trúc logic của việc đảo chiều trạng thái nhị phân.
+1. **Không có bất kỳ sự kiện INIT_BREAK nào:** Quy tắc warm-up mặc định nạp toàn bộ lịch sử (`warmup_months=None`) đã loại bỏ hoàn toàn sự kiện khởi tạo nhân tạo; xu hướng mở đầu năm 2018 là `BULLISH` tự nhiên đã được kiểm chứng thực nghiệm (kế thừa trực tiếp từ sự kiện `BULLISH_BOS` lúc 17:00 UTC ngày 29/12/2017 phá đỉnh 1305.85, đóng cửa 1305.99; và mở đầu năm 2018 bằng `BULLISH_BOS` phá đỉnh 1307.41 lúc 07:00 ngày 02/01/2018).
+2. **Tính đối xứng luân phiên hoàn hảo của CHoCH:** $N_{\text{BULLISH\_CHOCH}} = 773$ và $N_{\text{BEARISH\_CHOCH}} = 773$ bằng nhau tuyệt đối qua toàn bộ 7.5 năm. Đây là hệ quả cấu trúc logic của việc đảo chiều trạng thái nhị phân.
 3. **Tỷ lệ Tiếp diễn trên Đảo chiều:** Tỷ lệ $\frac{\text{BOS}}{\text{CHoCH}} \approx \frac{2.940}{1.546} \approx 1,90$ (khoảng 1,8–2,2 BOS cho mỗi lần đổi chiều).
 4. **Nhịp độ đổi xu hướng:** Trung bình ~206 lần đổi chiều/năm (~28 nến H1 mỗi chế độ xu hướng).
 5. **Khớp 5 bất biến vật lý:** Tối đa 1 sự kiện/nến; tính liên tục Markov ($prior\_trend_{n+1} = new\_trend_n$); First Break Only (không trùng $broken\_swing\_id$); Zero Look-ahead ($time\_available \le time\_candle$); Giá đóng cửa vượt đúng phía.

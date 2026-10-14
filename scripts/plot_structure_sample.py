@@ -167,9 +167,9 @@ def main():
         ))
 
     fig.update_layout(
-        title=f"Kiểm tra trực quan Cấu trúc SMC (BOS & CHoCH) trên H1 Gold ({start_date} -> {end_date})",
+        title=f"Kiểm tra trực quan Cấu trúc SMC (BOS & CHoCH) trên H1 GOLD ({start_date} -> {end_date})",
         xaxis_title="Thời gian (UTC)",
-        yaxis_title="Giá XAU/USD",
+        yaxis_title="Giá Vàng (USD)",
         template="plotly_dark",
         xaxis_rangeslider_visible=False,
         height=800,

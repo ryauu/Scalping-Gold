@@ -696,13 +696,15 @@ class TestStructureModule(unittest.TestCase):
 
         # 3. Kiểm chứng tỷ lệ ghép sự kiện thực sự với 12 tháng (từ 2017-01-01)
         s_12m = load_structure("2018-01-01", "2025-06-30", warmup_months=12, k=3)
-        m_12m = pd.merge(s_default, s_12m, on=["time_available", "event_type"])
-        self.assertEqual(len(m_12m), 4485, "Khớp thực sự 12m phải đạt 4.485 / 4.486 (99,978%)")
+        self.assertEqual(len(s_12m), 4485, "Số lượng sự kiện s_12m phải là 4.485 (thiếu đúng 1 sự kiện phá đỉnh 1374.99 năm 2016)")
+        m_12m = pd.merge(s_default, s_12m, on=["time_available", "event_type", "price_broken"])
+        self.assertEqual(len(m_12m), 4485, "Khớp thực sự 12m (theo time_available, event_type, price_broken) phải đạt 4.485 / 4.486 (99,978%)")
 
         # 4. Kiểm chứng tỷ lệ ghép sự kiện thực sự với 6 tháng (từ 2017-06-01)
         s_6m = load_structure("2018-01-01", "2025-06-30", warmup_months=6, k=3)
-        m_6m = pd.merge(s_default, s_6m, on=["time_available", "event_type"])
-        self.assertEqual(len(m_6m), 4481, "Khớp thực sự 6m phải đạt 4.481 / 4.486 (99,889%)")
+        self.assertEqual(len(s_6m), 4481, "Số lượng sự kiện s_6m phải là 4.481 (thiếu 5 sự kiện so với 4.486)")
+        m_6m = pd.merge(s_default, s_6m, on=["time_available", "event_type", "price_broken"])
+        self.assertEqual(len(m_6m), 4481, "Khớp thực sự 6m (theo time_available, event_type, price_broken) phải đạt 4.481 / 4.486 (99,889%)")
 
     def test_15_invariants_and_annual_distribution_on_real_h1(self):
         """15. KIỂM TRA 5 BẤT BIẾN VẬT LÝ VÀ PHÂN BỐ SỰ KIỆN TRÊN H1 THẬT (2018–2025).
