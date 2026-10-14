@@ -154,7 +154,8 @@ def detect_fvg(
     time_dur_ns = bar_duration.to_numpy()
 
     for i in range(2, n_bars):
-        # Nến i phải có ATR[i-1] hợp lệ (không NaN)
+        # Nến i phải có ATR[i-1] hợp lệ (không NaN và > 0)
+        # Bỏ qua nếu ATR chưa đủ nến khởi động (14 nến đầu) hoặc dữ liệu dị thường (ATR <= 0)
         atr_ref = atr_series[i - 1]
         if np.isnan(atr_ref) or atr_ref <= 0.0:
             continue
@@ -255,7 +256,6 @@ def detect_fvg(
         # Quét tiến j = i+1, i+2, ...
         tested = False
         just_tested_at_m = False
-        terminated = False
 
         for j in range(i + 1, n_bars):
             t_candle_j = pd.Timestamp(times[j])
@@ -289,7 +289,6 @@ def detect_fvg(
                         "time_available": t_avail_j,
                         "price_trigger": np.nan,
                     })
-                terminated = True
                 break
 
             # Thứ tự kiểm tra tại mỗi nến j:
@@ -305,7 +304,6 @@ def detect_fvg(
                     "time_available": t_avail_j,
                     "price_trigger": close_j,
                 })
-                terminated = True
                 break
 
             # 2. Touch / Test: Chạm mép gần (chỉ ghi nhận 1 lần duy nhất)
@@ -339,10 +337,25 @@ def detect_fvg(
                     "time_available": t_avail_j,
                     "price_trigger": np.nan,
                 })
-                terminated = True
                 break
 
-    lifecycle_df = pd.DataFrame(lifecycle_records)[LIFECYCLE_COLUMNS]
+    if not lifecycle_records:
+        return fvg_df, pd.DataFrame(columns=LIFECYCLE_COLUMNS)
+
+    lifecycle_df = pd.DataFrame(lifecycle_records)
+
+    # Sắp xếp ổn định theo thời gian: time_available -> fvg_id -> thứ tự sự kiện
+    # Thứ tự ưu tiên sự kiện cùng thời điểm: CREATED (0) -> TESTED (1) -> INVALIDATED (2) -> EXPIRED (3)
+    event_order_map = {"CREATED": 0, "TESTED": 1, "INVALIDATED": 2, "EXPIRED": 3}
+    lifecycle_df["_event_order"] = lifecycle_df["event_type"].map(event_order_map).fillna(99)
+    lifecycle_df = lifecycle_df.sort_values(
+        by=["time_available", "fvg_id", "_event_order"],
+        kind="stable",
+    ).reset_index(drop=True)
+
+    # Gán lifecycle_id tuần tự từ 0 sau khi sắp xếp
+    lifecycle_df["lifecycle_id"] = np.arange(len(lifecycle_df), dtype=int)
+    lifecycle_df = lifecycle_df[LIFECYCLE_COLUMNS]
 
     return fvg_df, lifecycle_df
 
@@ -364,8 +377,8 @@ def get_active_fvg_at(
     Tham số:
         fvg_df: DataFrame danh sách FVG từ detect_fvg.
         lifecycle_df: DataFrame nhật ký vòng đời từ detect_fvg.
-        current_time: Thời điểm truy vấn.
-        valid_only: Nếu True, chỉ lấy các FVG liên tục không vắt qua cuối tuần.
+        current_time: Thời điểm truy vấn (Timestamp hoặc chuỗi).
+        valid_only: Nếu True, chỉ lấy các FVG liên tục không vắt qua cuối tuần/giờ nghỉ.
 
     Trả về:
         DataFrame chứa các FVG đang active kèm trạng thái đã test hay chưa.
@@ -376,7 +389,7 @@ def get_active_fvg_at(
     # Chuẩn hóa current_time sang UTC naive
     ts = pd.to_datetime(current_time)
     if ts.tzinfo is not None:
-        ts = ts.tz_convert("UTC").dt.tz_localize(None)
+        ts = ts.tz_convert("UTC").tz_localize(None)
 
     lc_avail = pd.to_datetime(lifecycle_df["time_available"])
     if lc_avail.dt.tz is not None:
@@ -418,11 +431,14 @@ def load_fvg(
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Nạp dữ liệu H1 và phát hiện FVG kèm nhật ký vòng đời chuẩn SMC.
 
-    Tự động áp dụng warm-up để triệt tiêu ảnh hưởng của 14 nến khởi động ATR ban đầu:
+    Tự động áp dụng warm-up để triệt tiêu ảnh hưởng của 14 nến khởi động ATR ban đầu
+    và bảo toàn các FVG tạo trước start_date nhưng còn hiệu lực tại start_date:
     1. Nếu warmup_months=None (mặc định): Nạp toàn bộ lịch sử từ đầu kho dữ liệu DuckDB
        (thời gian nạp <1s), tính toán FVG liên tục.
     2. Nếu warmup_months là số nguyên: Nạp từ start_date lùi về trước warmup_months tháng.
-    3. Lọc các FVG và sự kiện vòng đời có time_available >= start_date.
+    3. Lọc: Loại bỏ những FVG đã kết thúc (INVALIDATED hoặc EXPIRED) trước start_date.
+       Giữ lại toàn bộ các FVG chưa kết thúc trước start_date (bao gồm cả dòng CREATED
+       và toàn bộ nhật ký vòng đời của chúng).
 
     Tham số:
         start_date: Ngày bắt đầu lấy tín hiệu ('YYYY-MM-DD').
@@ -434,7 +450,7 @@ def load_fvg(
         bar_duration: Độ dài nến (mặc định 1 giờ đối với H1).
 
     Trả về:
-        tuple (fvg_df, lifecycle_df) đã lọc time_available >= start_date.
+        tuple (fvg_df, lifecycle_df) chứa các FVG còn hiệu lực hoặc hình thành trong giai đoạn.
     """
     from ..data import load_h1
 
@@ -459,15 +475,21 @@ def load_fvg(
 
     start_utc = pd.to_datetime(start_date)
     if start_utc.tzinfo is not None:
-        start_utc = start_utc.tz_convert("UTC").dt.tz_localize(None)
+        start_utc = start_utc.tz_convert("UTC").tz_localize(None)
 
-    fvg_avail = pd.to_datetime(fvg_all["time_available"])
-    if fvg_avail.dt.tz is not None:
-        fvg_avail = fvg_avail.dt.tz_convert("UTC").dt.tz_localize(None)
+    lc_avail = pd.to_datetime(lc_all["time_available"])
+    if lc_avail.dt.tz is not None:
+        lc_avail = lc_avail.dt.tz_convert("UTC").dt.tz_localize(None)
 
-    fvg_filtered = fvg_all[fvg_avail >= start_utc].copy().reset_index(drop=True)
+    # 1. Các FVG đã kết thúc (INVALIDATED hoặc EXPIRED) trước mốc start_utc
+    term_mask = (lc_all["event_type"].isin(["INVALIDATED", "EXPIRED"])) & (lc_avail < start_utc)
+    terminated_before_start = set(lc_all.loc[term_mask, "fvg_id"])
+
+    # 2. Giữ lại mọi FVG chưa kết thúc trước start_utc
+    fvg_filtered = fvg_all[~fvg_all["fvg_id"].isin(terminated_before_start)].copy().reset_index(drop=True)
     kept_fvg_ids = set(fvg_filtered["fvg_id"])
 
+    # 3. Lọc bảng vòng đời tương ứng với các FVG còn sống (bao gồm cả dòng CREATED của chúng)
     lc_filtered = lc_all[lc_all["fvg_id"].isin(kept_fvg_ids)].copy().reset_index(drop=True)
 
     return fvg_filtered, lc_filtered

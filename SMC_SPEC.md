@@ -181,6 +181,10 @@ Nhật ký vòng đời `lifecycle_df` theo dõi trạng thái bằng thuật to
    $$\mathbf{INVALIDATED} > \mathbf{TESTED} > \mathbf{EXPIRED}$$
    Nếu một nến vừa chạm mép gần vừa đóng cửa xuyên mép xa $\implies$ Chỉ ghi nhận duy nhất `INVALIDATED`.
 4. **Tham số vòng đời:** **PRIMARY $M = 24$ nến** (1 ngày giao dịch). EXPLORATORY: $M = 48$ nến. Độ phức tạp $O(N_{\text{FVG}} \times M)$ tối ưu, duyệt tiến siêu tốc.
+5. **Sắp xếp thời gian ổn định (Chronological Order):**
+   Bảng `lifecycle_df` được sắp xếp ổn định theo `time_available` (thời điểm khả dụng), tiếp đến `fvg_id`, rồi thứ tự ưu tiên sự kiện (`CREATED` -> `INVALIDATED` -> `TESTED` -> `EXPIRED`). Cột `lifecycle_id` được gán tuần tự từ 0 sau khi hoàn tất sắp xếp, đảm bảo người dùng có thể duyệt sự kiện xuôi theo dòng thời gian mà không bị xáo trộn.
+6. **Bảo toàn FVG warm-up còn hiệu lực (`load_fvg`):**
+   Để duy trì tính liên tục của dữ liệu và tuân thủ nguyên tắc warm-up như cấu trúc thị trường, `load_fvg(start_date, ...)` bảo toàn mọi FVG chưa kết thúc trước `start_date` (tức các FVG chưa bị `INVALIDATED` hay `EXPIRED` trước mốc đó, bao gồm cả dòng `CREATED` và chuỗi sự kiện của chúng), và chỉ lọc bỏ các FVG đã kết thúc hoàn toàn trước `start_date`. Với tập Development 2018–2025, có 4 FVG tạo cuối ngày 29/12/2017 còn hiệu lực lúc 00:00 ngày 01/01/2018 được bảo toàn, nâng tổng số FVG từ 5.774 lên 5.778 FVG.
 
 ---
 
