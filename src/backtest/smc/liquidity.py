@@ -488,14 +488,14 @@ def detect_liquidity_pools(
                     # Bắt buộc có ATR hợp lệ để đánh giá EQH
                     if "EQH" in active_types and atr_ref > 0.0:
                         # 2.1: Kiểm tra Hấp thụ Chuỗi (Chained Absorption) vào pool EQH đang ACTIVE
+                        # Tuyệt đối KHÔNG gia hạn tuổi và KHÔNG sửa đổi các trường của pool EQH ban đầu (bảo toàn Prefix Invariance & V2-11)
                         for eqh_cand in active_eqh_pools:
                             eqh_p = raw_pools[eqh_cand["pool_id"]]
                             if eqh_p["state"] == "ACTIVE":
-                                j_last = eqh_cand["last_swing_candle"]
                                 p_eqh = eqh_p["price"]
 
-                                if (j2 - j_last <= m) and (p2 <= p_eqh) and (abs(p_eqh - p2) <= eps * atr_ref):
-                                    # Hấp thụ s2 vào EQH đang có
+                                if (p2 <= p_eqh) and (abs(p_eqh - p2) <= eps * atr_ref):
+                                    # Hấp thụ s2 vào EQH đang có mà không sửa dòng pool EQH
                                     pool2["state"] = "ABSORBED"
                                     events_log.append({
                                         "pool_id": pid2,
@@ -508,10 +508,6 @@ def detect_liquidity_pools(
                                         "pool_age": 0,
                                         "close_price": t_close,
                                     })
-                                    # Gia hạn tuổi cho pool EQH
-                                    eqh_p["bar_index_avail"] = t
-                                    eqh_cand["last_swing_candle"] = j2
-                                    eqh_p["source_id"] += f"_{s2['swing_id']}"
                                     absorbed_into_chain = True
                                     break
 
@@ -592,13 +588,13 @@ def detect_liquidity_pools(
 
                     if "EQL" in active_types and atr_ref > 0.0:
                         # 2.1: Hấp thụ chuỗi vào EQL đang active
+                        # Tuyệt đối KHÔNG gia hạn tuổi và KHÔNG sửa đổi các trường của pool EQL ban đầu (bảo toàn Prefix Invariance & V2-11)
                         for eql_cand in active_eql_pools:
                             eql_p = raw_pools[eql_cand["pool_id"]]
                             if eql_p["state"] == "ACTIVE":
-                                j_last = eql_cand["last_swing_candle"]
                                 p_eql = eql_p["price"]
 
-                                if (j2 - j_last <= m) and (p2 >= p_eql) and (abs(p_eql - p2) <= eps * atr_ref):
+                                if (p2 >= p_eql) and (abs(p_eql - p2) <= eps * atr_ref):
                                     pool2["state"] = "ABSORBED"
                                     events_log.append({
                                         "pool_id": pid2,
@@ -611,9 +607,6 @@ def detect_liquidity_pools(
                                         "pool_age": 0,
                                         "close_price": t_close,
                                     })
-                                    eql_p["bar_index_avail"] = t
-                                    eql_cand["last_swing_candle"] = j2
-                                    eql_p["source_id"] += f"_{s2['swing_id']}"
                                     absorbed_into_chain = True
                                     break
 
