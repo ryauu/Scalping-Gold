@@ -8,35 +8,45 @@ Theo đặc tả SMC_SPEC.md v2.3 (Mục 5):
    - EQH / EQL (Equal Highs / Equal Lows):
      Hai Swing High (EQH) hoặc hai Swing Low (EQL) liên tiếp cùng loại thỏa mãn:
      * Khoảng cách nến: j2 - j1 <= M (PRIMARY M = 24 nến H1).
-     * Pool 1 còn ACTIVE tại time_available của Swing 2 (chưa bị SWEPT, BROKEN, hay EXPIRED).
-     * Biên độ giá bằng nhau: |Price1 - Price2| <= eps * ATR(H1, 14)[j2] (PRIMARY eps = 0.08).
+     * Bắt buộc có ATR hợp lệ (ATR > 0). Không tạo EQH/EQL khi chưa đủ dữ liệu khởi động ATR.
+     * Dung sai giá: |Price1 - Price2| <= eps * ATR(H1, 14)[j2] (PRIMARY eps = 0.08).
      * Ràng buộc chiều giá bắt buộc: Price2 <= Price1 đối với EQH, Price2 >= Price1 đối với EQL.
+     * Pool 1 còn ACTIVE tại time_available của Swing 2 (chưa bị SWEPT, BROKEN, hay EXPIRED).
      * Mức giá của Pool: Price_EQH = Price1, Price_EQL = Price1.
      * Quy tắc hấp thụ (Absorption Rule): Khi EQH/EQL hình thành, hai swing cấu thành lập tức
        chuyển sang trạng thái ABSORBED tại time_available của Swing 2.
-     * Tuổi của EQH/EQL bắt đầu từ 0 tại time_available của Swing 2, sống tối đa M = 24 nến tiếp theo.
+     * Quy tắc chuỗi (Chained Absorption for Triple/Multi Highs/Lows): Nếu có swing thứ 3 tiếp tục
+       thỏa mãn mức giá của EQH/EQL đang ACTIVE và cách swing trước <= M nến, swing 3 sẽ được hấp thụ
+       vào chính pool EQH/EQL đó (gia hạn hạn tuổi pool thêm M nến), triệt tiêu hoàn toàn việc sinh
+       pool đè gây đếm lặp sự kiện quét.
    - PDH / PDL (Previous Day High / Low):
      Chốt ngày giao dịch theo giờ đóng cửa New York lúc 17:00 NY (xử lý DST tự động qua zoneinfo):
      * Mùa đông (EST, UTC-5): 17:00 NY = 22:00 UTC (nến H1 nhãn 21:00 UTC, đóng lúc 22:00 UTC).
      * Mùa hè (EDT, UTC-4): 17:00 NY = 21:00 UTC (nến H1 nhãn 20:00 UTC, đóng lúc 21:00 UTC).
-     Khả dụng ngay khi nến H1 cuối ngày đóng cửa. Hết hạn sau M = 24 nến H1 hoặc khi bộ PDH/PDL mới khả dụng.
+     * Ngày nghỉ lễ đóng sớm (Holiday Early Close): Khả dụng ngay khi nến cuối cùng trước giờ nghỉ
+       đóng cửa (ví dụ MLK Day đóng sớm lúc 19:00 UTC).
+     * Hạn tuổi thống nhất: Hết hạn sau M = 24 nến H1 kể từ time_available.
+     * Định danh chuẩn: source_id = 'pdh_YYYY-MM-DD' và 'pdl_YYYY-MM-DD'.
    - ASIAN_HIGH / ASIAN_LOW (Biên vùng Á):
      Phiên Á gồm các nến H1 từ 00:00 đến 06:00 UTC (nến 06:00 UTC đóng lúc 07:00 UTC).
      Khả dụng từ 07:00 UTC. Hết hạn sau M = 24 nến H1 (đến 07:00 UTC hôm sau).
+     Định danh chuẩn: source_id = 'asian_high_YYYY-MM-DD' và 'asian_low_YYYY-MM-DD'.
 
 2. Máy trạng thái 5 trạng thái của Pool:
    ACTIVE -> SWEPT / BROKEN / EXPIRED / ABSORBED
    - High Pool (Buy-side):
-     * SWEPT: High[t] > Pool.price VÀ Close[t] <= Pool.price.
+     * Không sự kiện nếu High[t] <= Pool.price (dấu bằng không phát sinh sự kiện).
+     * SWEPT: High[t] > Pool.price VÀ Close[t] <= Pool.price (dấu bằng tại Close là SWEPT).
      * BROKEN: Close[t] > Pool.price.
    - Low Pool (Sell-side):
-     * SWEPT: Low[t] < Pool.price VÀ Close[t] >= Pool.price.
+     * Không sự kiện nếu Low[t] >= Pool.price (dấu bằng không phát sinh sự kiện).
+     * SWEPT: Low[t] < Pool.price VÀ Close[t] >= Pool.price (dấu bằng tại Close là SWEPT).
      * BROKEN: Close[t] < Pool.price.
    - EXPIRED: Khi nến t đạt t - bar_index_avail >= M mà chưa bị vi phạm và chưa bị hấp thụ.
      Quy tắc biên: Tại đúng nến t = bar_index_avail + M (nến thứ 24), pool VẪN CÒN ACTIVE
      trong suốt cây nến để nhận diện vi phạm hoặc hấp thụ thành EQH/EQL; chỉ chuyển sang EXPIRED
      khi nến thứ M đóng cửa mà không bị chạm hay hấp thụ.
-   - ABSORBED: Chỉ dành cho swing đơn lẻ khi được hợp nhất thành EQH/EQL.
+   - ABSORBED: Dành cho swing đơn lẻ khi được hợp nhất vào EQH/EQL.
 
 3. Xử lý Nến ngoài (Outside Bar):
    Mỗi pool tự quyết định độc lập theo mức giá của chính nó. Cả hai sự kiện đều phát ra
@@ -204,7 +214,7 @@ def detect_liquidity_pools(
         else:
             swing_lows.append(s_dict)
 
-    # 2. Phát hiện PDH / PDL (17:00 NY close)
+    # 2. Phát hiện PDH / PDL (17:00 NY close & Holiday Early Close)
     pdh_pdl_pools: list[dict] = []
     if "PDH" in active_types or "PDL" in active_types:
         time_utc_series = pd.to_datetime(df_clean["time_utc"])
@@ -221,12 +231,14 @@ def detect_liquidity_pools(
             last_bar_time = pd.to_datetime(time_utc_arr[last_idx])
             avail_time = last_bar_time + bar_duration
 
-            # Kiểm tra xem trading day này đã thực sự đóng cửa chưa
-            # Nếu là ngày cuối cùng trong tập dữ liệu, nến cuối bắt buộc phải đóng lúc 17:00 NY
+            # Kiểm tra xem trading day này đã thực sự đóng cửa chưa:
+            # 1. Nếu không phải ngày cuối trong df -> ngày kế tiếp đã xuất hiện, ngày d đã đóng.
+            # 2. Nếu là ngày cuối trong df -> kiểm tra xem nến cuối có đóng lúc 17:00 NY không.
             is_last_day = (idx_d == len(unique_days) - 1)
             if is_last_day:
                 ny_close = (last_bar_time + bar_duration).tz_localize("UTC").tz_convert("America/New_York")
                 if not (ny_close.hour == 17 and ny_close.minute == 0):
+                    # Chưa kết thúc ngày nếu không có nến tiếp theo và chưa đạt 17:00 NY
                     continue
 
             d_high = float(high_arr[grp_indices].max())
@@ -267,8 +279,8 @@ def detect_liquidity_pools(
                 last_bar_time = pd.to_datetime(time_utc_arr[last_idx])
                 avail_time = last_bar_time + bar_duration
 
-                # Kiểm tra xem phiên Á này đã hoàn thành chưa:
-                # Phải là nến mở 06:00 UTC (đóng 07:00 UTC), hoặc nến tiếp theo trong df có hour >= 7
+                # Phiên Á hoàn chỉnh khi nến 06:00 UTC đóng cửa (avail_time >= 07:00 UTC),
+                # hoặc có nến tiếp theo trong df
                 session_complete = False
                 if last_bar_time.hour == 6:
                     session_complete = True
@@ -391,6 +403,10 @@ def detect_liquidity_pools(
     active_pool_ids: list[int] = []
     events_log: list[dict] = []
 
+    # Lưu vết các EQH/EQL pool đang active để thực hiện hấp thụ chuỗi (Chained Absorption)
+    active_eqh_pools: list[dict] = []
+    active_eql_pools: list[dict] = []
+
     confirmed_swing_highs: list[dict] = []
     confirmed_swing_lows: list[dict] = []
 
@@ -421,14 +437,18 @@ def detect_liquidity_pools(
             price_trigger = np.nan
 
             if is_buy:
+                # Dấu bằng không phát sinh sự kiện. Chỉ vi phạm khi High[t] > price_lvl
                 if t_high > price_lvl:
                     violated = True
                     price_trigger = t_high
+                    # Close[t] == price_lvl là SWEPT (chưa vượt hẳn)
                     ev_type = "BROKEN" if t_close > price_lvl else "SWEPT"
             else:
+                # Dấu bằng không phát sinh sự kiện. Chỉ vi phạm khi Low[t] < price_lvl
                 if t_low < price_lvl:
                     violated = True
                     price_trigger = t_low
+                    # Close[t] == price_lvl là SWEPT (chưa vượt hẳn)
                     ev_type = "BROKEN" if t_close < price_lvl else "SWEPT"
 
             if violated:
@@ -456,140 +476,209 @@ def detect_liquidity_pools(
                 s2_type = s2["swing_type"]
                 j2 = s2["bar_index_candle"]
                 p2 = s2["price"]
+                atr_ref = atr_arr[j2] if (j2 < len(atr_arr) and not np.isnan(atr_arr[j2])) else 0.0
 
                 if s2_type == "HIGH":
-                    if "EQH" in active_types and confirmed_swing_highs:
-                        s1 = confirmed_swing_highs[-1]
-                        j1 = s1["bar_index_candle"]
-                        p1 = s1["price"]
-                        pid1 = swing_pool_map[("HIGH", s1["swing_id"])]
-                        pool1 = raw_pools[pid1]
+                    if ("HIGH", s2["swing_id"]) not in swing_pool_map:
+                        continue
+                    absorbed_into_chain = False
+                    pid2 = swing_pool_map[("HIGH", s2["swing_id"])]
+                    pool2 = raw_pools[pid2]
 
-                        # 4 điều kiện khép kín EQH:
-                        # 1. Khoảng cách nến: j2 - j1 <= m
-                        # 2. Pool 1 còn ACTIVE tại thời điểm nến t đóng cửa
-                        # 3. |p1 - p2| <= eps * atr[j2]
-                        # 4. p2 <= p1 (ràng buộc chiều giá)
-                        atr_ref = atr_arr[j2] if not np.isnan(atr_arr[j2]) else 0.0
-                        cond_dist = (j2 - j1 <= m)
-                        cond_active = (pool1["state"] == "ACTIVE")
-                        cond_tol = (abs(p1 - p2) <= eps * atr_ref) if atr_ref > 0 else (p1 == p2)
-                        cond_dir = (p2 <= p1)
+                    # Bắt buộc có ATR hợp lệ để đánh giá EQH
+                    if "EQH" in active_types and atr_ref > 0.0:
+                        # 2.1: Kiểm tra Hấp thụ Chuỗi (Chained Absorption) vào pool EQH đang ACTIVE
+                        for eqh_cand in active_eqh_pools:
+                            eqh_p = raw_pools[eqh_cand["pool_id"]]
+                            if eqh_p["state"] == "ACTIVE":
+                                j_last = eqh_cand["last_swing_candle"]
+                                p_eqh = eqh_p["price"]
 
-                        if cond_dist and cond_active and cond_tol and cond_dir:
-                            eqh_id = curr_pool_id
-                            curr_pool_id += 1
-                            eqh_pool = {
-                                "pool_id": eqh_id,
-                                "pool_type": "EQH",
-                                "price": p1,
-                                "bar_index_candle": j2,
-                                "bar_index_avail": t,
-                                "time_candle": s2["time_candle"],
-                                "time_available": t_time_avail,
-                                "source_id": f"eqh_{s1['swing_id']}_{s2['swing_id']}",
-                                "is_buy_side": True,
-                                "state": "ACTIVE",
-                            }
-                            raw_pools.append(eqh_pool)
-                            active_pool_ids.append(eqh_id)
+                                if (j2 - j_last <= m) and (p2 <= p_eqh) and (abs(p_eqh - p2) <= eps * atr_ref):
+                                    # Hấp thụ s2 vào EQH đang có
+                                    pool2["state"] = "ABSORBED"
+                                    events_log.append({
+                                        "pool_id": pid2,
+                                        "pool_type": pool2["pool_type"],
+                                        "event_type": "ABSORBED",
+                                        "bar_index": t,
+                                        "time_candle": t_time_candle,
+                                        "time_available": t_time_avail,
+                                        "price_trigger": np.nan,
+                                        "pool_age": 0,
+                                        "close_price": t_close,
+                                    })
+                                    # Gia hạn tuổi cho pool EQH
+                                    eqh_p["bar_index_avail"] = t
+                                    eqh_cand["last_swing_candle"] = j2
+                                    eqh_p["source_id"] += f"_{s2['swing_id']}"
+                                    absorbed_into_chain = True
+                                    break
 
-                            # Hấp thụ Pool 1
-                            pool1["state"] = "ABSORBED"
-                            if pid1 in active_pool_ids:
-                                active_pool_ids.remove(pid1)
-                            events_log.append({
-                                "pool_id": pid1,
-                                "pool_type": pool1["pool_type"],
-                                "event_type": "ABSORBED",
-                                "bar_index": t,
-                                "time_candle": t_time_candle,
-                                "time_available": t_time_avail,
-                                "price_trigger": np.nan,
-                                "pool_age": t - pool1["bar_index_avail"],
-                                "close_price": t_close,
-                            })
+                        # 2.2: Nếu không hấp thụ chuỗi, kiểm tra tạo EQH mới với swing tiền nhiệm
+                        if not absorbed_into_chain and confirmed_swing_highs:
+                            s1 = confirmed_swing_highs[-1]
+                            j1 = s1["bar_index_candle"]
+                            p1 = s1["price"]
+                            pid1 = swing_pool_map[("HIGH", s1["swing_id"])]
+                            pool1 = raw_pools[pid1]
 
-                            # Hấp thụ Pool 2
-                            pid2 = swing_pool_map[("HIGH", s2["swing_id"])]
-                            pool2 = raw_pools[pid2]
-                            pool2["state"] = "ABSORBED"
-                            events_log.append({
-                                "pool_id": pid2,
-                                "pool_type": pool2["pool_type"],
-                                "event_type": "ABSORBED",
-                                "bar_index": t,
-                                "time_candle": t_time_candle,
-                                "time_available": t_time_avail,
-                                "price_trigger": np.nan,
-                                "pool_age": 0,
-                                "close_price": t_close,
-                            })
+                            cond_dist = (j2 - j1 <= m)
+                            cond_active = (pool1["state"] == "ACTIVE")
+                            cond_tol = (abs(p1 - p2) <= eps * atr_ref)
+                            cond_dir = (p2 <= p1)
+
+                            if cond_dist and cond_active and cond_tol and cond_dir:
+                                eqh_id = curr_pool_id
+                                curr_pool_id += 1
+                                eqh_pool = {
+                                    "pool_id": eqh_id,
+                                    "pool_type": "EQH",
+                                    "price": p1,
+                                    "bar_index_candle": j2,
+                                    "bar_index_avail": t,
+                                    "time_candle": s2["time_candle"],
+                                    "time_available": t_time_avail,
+                                    "source_id": f"eqh_{s1['swing_id']}_{s2['swing_id']}",
+                                    "is_buy_side": True,
+                                    "state": "ACTIVE",
+                                }
+                                raw_pools.append(eqh_pool)
+                                active_pool_ids.append(eqh_id)
+                                active_eqh_pools.append({
+                                    "pool_id": eqh_id,
+                                    "last_swing_candle": j2,
+                                })
+
+                                # Hấp thụ Pool 1
+                                pool1["state"] = "ABSORBED"
+                                if pid1 in active_pool_ids:
+                                    active_pool_ids.remove(pid1)
+                                events_log.append({
+                                    "pool_id": pid1,
+                                    "pool_type": pool1["pool_type"],
+                                    "event_type": "ABSORBED",
+                                    "bar_index": t,
+                                    "time_candle": t_time_candle,
+                                    "time_available": t_time_avail,
+                                    "price_trigger": np.nan,
+                                    "pool_age": t - pool1["bar_index_avail"],
+                                    "close_price": t_close,
+                                })
+
+                                # Hấp thụ Pool 2
+                                pool2["state"] = "ABSORBED"
+                                events_log.append({
+                                    "pool_id": pid2,
+                                    "pool_type": pool2["pool_type"],
+                                    "event_type": "ABSORBED",
+                                    "bar_index": t,
+                                    "time_candle": t_time_candle,
+                                    "time_available": t_time_avail,
+                                    "price_trigger": np.nan,
+                                    "pool_age": 0,
+                                    "close_price": t_close,
+                                })
 
                     confirmed_swing_highs.append(s2)
 
                 else:
                     # EQL
-                    if "EQL" in active_types and confirmed_swing_lows:
-                        s1 = confirmed_swing_lows[-1]
-                        j1 = s1["bar_index_candle"]
-                        p1 = s1["price"]
-                        pid1 = swing_pool_map[("LOW", s1["swing_id"])]
-                        pool1 = raw_pools[pid1]
+                    if ("LOW", s2["swing_id"]) not in swing_pool_map:
+                        continue
+                    absorbed_into_chain = False
+                    pid2 = swing_pool_map[("LOW", s2["swing_id"])]
+                    pool2 = raw_pools[pid2]
 
-                        atr_ref = atr_arr[j2] if not np.isnan(atr_arr[j2]) else 0.0
-                        cond_dist = (j2 - j1 <= m)
-                        cond_active = (pool1["state"] == "ACTIVE")
-                        cond_tol = (abs(p1 - p2) <= eps * atr_ref) if atr_ref > 0 else (p1 == p2)
-                        cond_dir = (p2 >= p1)
+                    if "EQL" in active_types and atr_ref > 0.0:
+                        # 2.1: Hấp thụ chuỗi vào EQL đang active
+                        for eql_cand in active_eql_pools:
+                            eql_p = raw_pools[eql_cand["pool_id"]]
+                            if eql_p["state"] == "ACTIVE":
+                                j_last = eql_cand["last_swing_candle"]
+                                p_eql = eql_p["price"]
 
-                        if cond_dist and cond_active and cond_tol and cond_dir:
-                            eql_id = curr_pool_id
-                            curr_pool_id += 1
-                            eql_pool = {
-                                "pool_id": eql_id,
-                                "pool_type": "EQL",
-                                "price": p1,
-                                "bar_index_candle": j2,
-                                "bar_index_avail": t,
-                                "time_candle": s2["time_candle"],
-                                "time_available": t_time_avail,
-                                "source_id": f"eql_{s1['swing_id']}_{s2['swing_id']}",
-                                "is_buy_side": False,
-                                "state": "ACTIVE",
-                            }
-                            raw_pools.append(eql_pool)
-                            active_pool_ids.append(eql_id)
+                                if (j2 - j_last <= m) and (p2 >= p_eql) and (abs(p_eql - p2) <= eps * atr_ref):
+                                    pool2["state"] = "ABSORBED"
+                                    events_log.append({
+                                        "pool_id": pid2,
+                                        "pool_type": pool2["pool_type"],
+                                        "event_type": "ABSORBED",
+                                        "bar_index": t,
+                                        "time_candle": t_time_candle,
+                                        "time_available": t_time_avail,
+                                        "price_trigger": np.nan,
+                                        "pool_age": 0,
+                                        "close_price": t_close,
+                                    })
+                                    eql_p["bar_index_avail"] = t
+                                    eql_cand["last_swing_candle"] = j2
+                                    eql_p["source_id"] += f"_{s2['swing_id']}"
+                                    absorbed_into_chain = True
+                                    break
 
-                            pool1["state"] = "ABSORBED"
-                            if pid1 in active_pool_ids:
-                                active_pool_ids.remove(pid1)
-                            events_log.append({
-                                "pool_id": pid1,
-                                "pool_type": pool1["pool_type"],
-                                "event_type": "ABSORBED",
-                                "bar_index": t,
-                                "time_candle": t_time_candle,
-                                "time_available": t_time_avail,
-                                "price_trigger": np.nan,
-                                "pool_age": t - pool1["bar_index_avail"],
-                                "close_price": t_close,
-                            })
+                        # 2.2: Tạo EQL mới
+                        if not absorbed_into_chain and confirmed_swing_lows:
+                            s1 = confirmed_swing_lows[-1]
+                            j1 = s1["bar_index_candle"]
+                            p1 = s1["price"]
+                            pid1 = swing_pool_map[("LOW", s1["swing_id"])]
+                            pool1 = raw_pools[pid1]
 
-                            pid2 = swing_pool_map[("LOW", s2["swing_id"])]
-                            pool2 = raw_pools[pid2]
-                            pool2["state"] = "ABSORBED"
-                            events_log.append({
-                                "pool_id": pid2,
-                                "pool_type": pool2["pool_type"],
-                                "event_type": "ABSORBED",
-                                "bar_index": t,
-                                "time_candle": t_time_candle,
-                                "time_available": t_time_avail,
-                                "price_trigger": np.nan,
-                                "pool_age": 0,
-                                "close_price": t_close,
-                            })
+                            cond_dist = (j2 - j1 <= m)
+                            cond_active = (pool1["state"] == "ACTIVE")
+                            cond_tol = (abs(p1 - p2) <= eps * atr_ref)
+                            cond_dir = (p2 >= p1)
+
+                            if cond_dist and cond_active and cond_tol and cond_dir:
+                                eql_id = curr_pool_id
+                                curr_pool_id += 1
+                                eql_pool = {
+                                    "pool_id": eql_id,
+                                    "pool_type": "EQL",
+                                    "price": p1,
+                                    "bar_index_candle": j2,
+                                    "bar_index_avail": t,
+                                    "time_candle": s2["time_candle"],
+                                    "time_available": t_time_avail,
+                                    "source_id": f"eql_{s1['swing_id']}_{s2['swing_id']}",
+                                    "is_buy_side": False,
+                                    "state": "ACTIVE",
+                                }
+                                raw_pools.append(eql_pool)
+                                active_pool_ids.append(eql_id)
+                                active_eql_pools.append({
+                                    "pool_id": eql_id,
+                                    "last_swing_candle": j2,
+                                })
+
+                                pool1["state"] = "ABSORBED"
+                                if pid1 in active_pool_ids:
+                                    active_pool_ids.remove(pid1)
+                                events_log.append({
+                                    "pool_id": pid1,
+                                    "pool_type": pool1["pool_type"],
+                                    "event_type": "ABSORBED",
+                                    "bar_index": t,
+                                    "time_candle": t_time_candle,
+                                    "time_available": t_time_avail,
+                                    "price_trigger": np.nan,
+                                    "pool_age": t - pool1["bar_index_avail"],
+                                    "close_price": t_close,
+                                })
+
+                                pool2["state"] = "ABSORBED"
+                                events_log.append({
+                                    "pool_id": pid2,
+                                    "pool_type": pool2["pool_type"],
+                                    "event_type": "ABSORBED",
+                                    "bar_index": t,
+                                    "time_candle": t_time_candle,
+                                    "time_available": t_time_avail,
+                                    "price_trigger": np.nan,
+                                    "pool_age": 0,
+                                    "close_price": t_close,
+                                })
 
                     confirmed_swing_lows.append(s2)
 
@@ -749,10 +838,18 @@ def load_liquidity(
     """Nạp Liquidity Pools và Sweeps chuẩn SMC với warm-up tự động.
 
     Tương tự như load_structure và load_fvg:
-    - Nạp từ đầu lịch sử nếu warmup_months=None (hoặc đủ số tháng warm-up).
-    - Bảo toàn mọi pool còn đang ACTIVE tại start_date.
+    - Nếu warmup_months is None: nạp từ đầu cơ sở dữ liệu lịch sử.
+    - Nếu warmup_months có giá trị: tính lùi start_date_with_warmup = start_date - warmup_months.
+    - Bảo toàn mọi pool còn đang ACTIVE tại start_date (hoặc có sự kiện kết thúc tại t_term >= start_date).
     """
-    df = load_h1(start_date=None if warmup_months is None else start_date, end_date=end_date)
+    if warmup_months is None:
+        load_start = None
+    elif start_date is None:
+        load_start = None
+    else:
+        load_start = (pd.to_datetime(start_date) - pd.DateOffset(months=warmup_months)).strftime("%Y-%m-%d")
+
+    df = load_h1(start_date=load_start, end_date=end_date)
     pools_df, sweeps_df = detect_liquidity_pools(
         df,
         k=k,
@@ -778,8 +875,9 @@ def load_liquidity(
             if p_avail >= t_start:
                 keep_pool_ids.add(pid)
             else:
+                # Nếu pool sinh trước start_date nhưng còn active hoặc kết thúc tại t_term >= t_start
                 t_term = term_map.get(pid)
-                if t_term is None or t_term > t_start:
+                if t_term is None or t_term >= t_start:
                     keep_pool_ids.add(pid)
 
         pools_df = pools_df[pools_df["pool_id"].isin(keep_pool_ids)].reset_index(drop=True)

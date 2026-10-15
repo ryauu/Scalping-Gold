@@ -1,9 +1,9 @@
 # SMC_SPEC.md — Đặc tả kỹ thuật các thành phần Smart Money Concepts (SMC)
 
-**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3 (Tag: `smc-spec-v2.3`)**  
-*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3 là việc chuẩn hóa toán học, khép kín các trường hợp biên và kiểm chứng thực nghiệm độc lập TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
+**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.1 (Tag: `smc-spec-v2.3.1`)**  
+*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.1 là việc chuẩn hóa toán học, khép kín các trường hợp biên và kiểm chứng thực nghiệm độc lập TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
 
-### Nhật ký hiệu chỉnh từ v1 sang v2.3 (Changelog):
+### Nhật ký hiệu chỉnh từ v1 sang v2.3.1 (Changelog):
 - **V2-1 (Khởi tạo xu hướng từ NEUTRAL):** Đổi tên sự kiện phá vỡ đầu tiên từ `NEUTRAL` thành `BULLISH_INIT_BREAK` / `BEARISH_INIT_BREAK` thay vì gọi là BOS. Khẳng định đây là sự kiện khởi tạo xu hướng, không dùng làm tín hiệu giao dịch tiếp diễn.
 - **V2-2 (Định nghĩa "Gần nhất" của Protected Level):** Quy định rõ ràng là gần nhất theo thời gian (`time_available`), với `bar_index` làm tie-breaker, loại bỏ cách hiểu theo mức giá.
 - **V2-3 (Vòng đời FVG):** Sự kiện `TESTED` chỉ ghi nhận đúng 1 lần duy nhất (First Touch Only); xác lập thứ tự ưu tiên dứt điểm: `INVALIDATED` > `TESTED` > `EXPIRED`.
@@ -28,6 +28,12 @@
      - *Khép kín trường hợp biên ($j_2 - j_1 = 24$):* Tại đúng nến thứ $M$, Pool 1 vẫn còn `ACTIVE` trong suốt cây nến để nhận diện vi phạm hoặc hấp thụ thành EQH/EQL; chỉ chuyển sang `EXPIRED` khi nến thứ $M$ đóng cửa mà không bị chạm hay hấp thụ.
   5. *Mọi Swing đã xác nhận đều là Pool:* Ở tầng thành phần (`liquidity.py`), không áp bộ lọc cấu trúc vì `structure.py` chỉ lọc theo giá đóng cửa trong khi pool bị thanh lý bởi râu nến. Việc lọc sweep là trách nhiệm của bộ sinh tín hiệu (`signals.py`) và phải được đăng ký tiên nghiệm (pre-registered) trước khi chạy backtest, không điều chỉnh sau khi xem số đếm.
   6. *Xử lý Nến ngoài (Outside Bar) vi phạm cả hai đầu:* Mỗi pool tự quyết định số phận độc lập theo mức giá của mình; cả hai sự kiện đều được phát ra tại $\text{close\_time}[t]$ nếu thỏa điều kiện.
+- **V2-12 (Khép kín Quy tắc Ba đỉnh bằng nhau, Ngày lễ đóng sớm & Chuẩn hóa Liquidity v2.3.1):**
+  1. *Quy tắc Hấp thụ Chuỗi cho Ba đỉnh/đáy bằng nhau (Triple/Multi Highs/Lows Chained Absorption):* Khi một swing mới (Swing 3) hình thành, nếu thỏa mãn điều kiện dung sai $|P_3 - P_{\text{EQH}}| \le \varepsilon \times ATR$, điều kiện chiều giá ($P_3 \le P_{\text{EQH}}$ với EQH, $P_3 \ge P_{\text{EQL}}$ với EQL), và nằm trong khoảng cách $M=24$ nến tính từ swing nến trước đó của pool EQH/EQL đang `ACTIVE`, Swing 3 lập tức bị hấp thụ (`ABSORBED`) vào chính pool EQH/EQL đó thay vì tạo ra pool đơn lẻ độc lập bên cạnh. Tuổi của pool EQH/EQL được gia hạn (`bar_index_avail` cập nhật về nến hiện tại $t$, nới thêm hạn tuổi $M$ nến), `last_swing_candle` cập nhật thành $j_3$, và `source_id` được nối thêm đuôi (ví dụ `eqh_1_2_3`). Quy tắc này triệt tiêu hoàn toàn hiện tượng 1 cây nến sweep quét đồng thời cả 2 pool liền kề gây đếm lặp vi phạm triết lý SMC.
+  2. *Quy tắc Ngày lễ đóng sớm (Holiday Early Close Rule) cho PDH/PDL:* Trong các ngày thị trường Mỹ đóng cửa sớm do nghỉ lễ (như Martin Luther King Jr. Day đóng sớm lúc 18:00/19:00 UTC), phiên giao dịch của ngày kết thúc tại nến cuối cùng trước giờ đóng cửa thực tế. Mức PDH và PDL khả dụng ngay khi nến cuối cùng đó đóng cửa (`time_available = close_time[last_bar]`), tính toán chính xác trên dữ liệu nến thực tế diễn ra trong ngày lễ đó.
+  3. *Loại bỏ fallback $p_1 == p_2$ khi thiếu ATR:* Bắt buộc phải có giá trị biến động thị trường hợp lệ ($ATR(H1, 14) > 0$) mới đánh giá điều kiện biên độ EQH/EQL; tuyệt đối không dùng so sánh bằng tuyệt đối khi chưa có ATR.
+  4. *Chuẩn hóa hàm `load_liquidity` & Bảo toàn Pool còn sống:* Khi chỉ định `warmup_months`, ngày bắt đầu nạp được lùi chính xác bằng `start_date - pd.DateOffset(months=warmup_months)`. Điều kiện bảo toàn pool khi lọc lịch sử được chuẩn hóa thành $t_{\text{term}} \ge T_{\text{start}}$ (thay vì $>$) để bảo toàn các pool kết thúc đúng tại $T_{\text{start}}$.
+  5. *Đồng bộ hóa Naming Convention trong Schema:* Chuỗi `source_id` cho phiên Á được định danh chuẩn hóa thành `"asian_high_YYYY-MM-DD"` và `"asian_low_YYYY-MM-DD"` (thay vì `"asia_YYYY-MM-DD"`), tránh trùng lặp giữa đỉnh và đáy.
 
 ---
 
@@ -234,6 +240,7 @@ Nhật ký vòng đời `lifecycle_df` theo dõi trạng thái bằng thuật to
    - **Thời điểm khả dụng:** $\text{time\_available} = \text{time\_available}(\text{swing}_2) = \text{close\_time}[j_2 + k]$.
    - **Quy tắc Hấp thụ (Absorption Rule - BẮT BUỘC):**  
      Khi Pool EQH (hoặc EQL) được kích hoạt tại $\text{time\_available}(\text{swing}_2)$, hai mức Swing đơn lẻ cấu thành ($\text{swing}_1$ và $\text{swing}_2$) **LẬP TỨC CHUYỂN SANG TRẠNG THÁI `ABSORBED` VÀ VÔ HIỆU HÓA**. Hệ thống chỉ theo dõi duy nhất mức giá của Pool EQH/EQL, loại bỏ hoàn toàn nguy cơ một cú sweep bị đếm lặp 2–3 lần.
+     - *Quy tắc Hấp thụ Chuỗi cho Ba đỉnh/đáy bằng nhau (Chained Absorption for Triple/Multi Highs/Lows):* Khi một swing tiếp theo (Swing 3 tại $j_3$) xuất hiện, nếu thỏa mãn dung sai với mức của pool EQH/EQL đang `ACTIVE` ($|P_3 - P_{\text{EQH}}| \le \varepsilon \times ATR$), thỏa ràng buộc chiều giá ($P_3 \le P_{\text{EQH}}$ với EQH, $P_3 \ge P_{\text{EQL}}$ với EQL), và khoảng cách nến $j_3 - j_{\text{last}} \le M$: Swing 3 **BỊ HẤP THỤ TIẾP VÀO CHÍNH POOL EQH/EQL ĐÓ** (chuyển sang `ABSORBED`), đồng thời tuổi của pool EQH/EQL được làm mới (gia hạn thêm $M$ nến kể từ nến hiện tại $t$, cập nhật $j_{\text{last}} = j_3$, và cập nhật `source_id`). Cơ chế này triệt tiêu hoàn toàn trường hợp Swing 3 tạo pool đơn lẻ cạnh EQH khiến 1 cú sweep kích hoạt 2 sự kiện cùng lúc.
    - *Vòng đời & Hạn tuổi:* Pool EQH/EQL có tuổi bắt đầu từ 0 tại $\text{time\_available}(\text{swing}_2)$, sống tối đa $M = 24$ nến tiếp theo, tự khép kín khi bị `SWEPT`, `BROKEN`, hoặc `EXPIRED`.
 
 3. **Đỉnh/Đáy ngày hôm trước (Previous Day High/Low - PDH/PDL):**
@@ -242,7 +249,8 @@ Nhật ký vòng đời `lifecycle_df` theo dõi trạng thái bằng thuật to
      - Mùa đông (EST, UTC-5): 17:00 NY tương ứng **22:00 UTC** (nến H1 đóng lúc 22:00 UTC).
      - Mùa hè (EDT, UTC-4): 17:00 NY tương ứng **21:00 UTC** (nến H1 đóng lúc 21:00 UTC).
    - *Thời điểm khả dụng:* PDH và PDL khả dụng ngay khi nến H1 cuối ngày đóng cửa (21:00 UTC mùa hè, 22:00 UTC mùa đông).
-   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** kể từ `time_available` (hoặc khi bộ PDH/PDL của ngày giao dịch mới bắt đầu có hiệu lực tại lần chốt ngày New York kế tiếp, tùy điều kiện nào đến trước). Vì một ngày giao dịch thông thường có 23–24 nến H1 (có 1 giờ nghỉ kỹ thuật), quy tắc $M = 24$ hàng dữ liệu bảo đảm PDH/PDL tự nhiên nhường chỗ cho ngày mới mà không cần quy tắc múi giờ riêng cho việc hết hạn và không bị kéo dài lệch qua cuối tuần.
+     - *Quy tắc Ngày lễ đóng sớm (Holiday Early Close Rule):* Vào những ngày thị trường đóng cửa sớm (như Martin Luther King Jr. Day đóng lúc 18:00/19:00 UTC), phiên giao dịch của ngày kết thúc tại nến cuối cùng trước giờ nghỉ thị trường. Mức PDH/PDL khả dụng ngay khi nến cuối cùng đó đóng cửa (`time_available = close_time[last_bar]`), tính toán chính xác trên dữ liệu nến diễn ra trong ngày lễ đó.
+   - *Vòng đời & Hạn tuổi thống nhất:* Hết hạn sau **$M = 24$ nến H1** kể từ `time_available`. Vì một ngày giao dịch thông thường có 23–24 nến H1 (có 1 giờ nghỉ kỹ thuật), quy tắc $M = 24$ hàng dữ liệu bảo đảm PDH/PDL tự nhiên nhường chỗ cho ngày mới mà không cần quy tắc múi giờ riêng cho việc hết hạn và không bị kéo dài lệch qua cuối tuần.
 
 4. **Biên vùng Á (Asian High / Asian Low):**
    - *Phiên Á:* 00:00 – 07:00 UTC.
@@ -309,7 +317,7 @@ Mô-đun `liquidity.py` xuất ra 2 bảng dữ liệu chuẩn hóa:
    - `bar_index_avail`: int (chỉ số nến chốt khả dụng)
    - `time_candle`: pd.Timestamp (giờ mở nến tạo đỉnh/đáy/phiên)
    - `time_available`: pd.Timestamp (thời điểm pool bắt đầu có hiệu lực)
-   - `source_id`: str (chuỗi định danh nguồn chuẩn hóa: ví dụ `"swing_12"`, `"eqh_10_11"`, `"pdh_2024-01-15"`, `"asia_2024-01-15"`, đảm bảo an toàn kiểu dữ liệu và nhất quán lưu trữ)
+   - `source_id`: str (chuỗi định danh nguồn chuẩn hóa: ví dụ `"swing_12"`, `"eqh_10_11"`, `"pdh_2024-01-15"`, `"asian_high_2024-01-15", "asian_low_2024-01-15"`, đảm bảo an toàn kiểu dữ liệu và nhất quán lưu trữ)
 
 2. **Bảng Nhật ký Vòng đời & Quét thanh khoản (`sweeps_df` hoặc `lifecycle_df`):**
    - `lifecycle_id`: int (định danh sự kiện tăng dần từ 0)
