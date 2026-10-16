@@ -1,9 +1,9 @@
 # SMC_SPEC.md — Đặc tả kỹ thuật các thành phần Smart Money Concepts (SMC)
 
-**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.1 (Tag: `smc-spec-v2.3.1`)**  
-*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.1 là việc chuẩn hóa toán học, khép kín các trường hợp biên và kiểm chứng thực nghiệm độc lập TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
+**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.2 (Tag: `smc-spec-v2.3.2`)**  
+*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.2 là việc hoàn thiện schema truy vết (cột absorbed_by), kiểm chứng thực nghiệm độc lập bằng kiểm thử hồi quy đối chiếu warm-up với dữ liệu thật và khép kín oracle hai chiều TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
 
-### Nhật ký hiệu chỉnh từ v1 sang v2.3.1 (Changelog):
+### Nhật ký hiệu chỉnh từ v1 sang v2.3.2 (Changelog):
 - **V2-1 (Khởi tạo xu hướng từ NEUTRAL):** Đổi tên sự kiện phá vỡ đầu tiên từ `NEUTRAL` thành `BULLISH_INIT_BREAK` / `BEARISH_INIT_BREAK` thay vì gọi là BOS. Khẳng định đây là sự kiện khởi tạo xu hướng, không dùng làm tín hiệu giao dịch tiếp diễn.
 - **V2-2 (Định nghĩa "Gần nhất" của Protected Level):** Quy định rõ ràng là gần nhất theo thời gian (`time_available`), với `bar_index` làm tie-breaker, loại bỏ cách hiểu theo mức giá.
 - **V2-3 (Vòng đời FVG):** Sự kiện `TESTED` chỉ ghi nhận đúng 1 lần duy nhất (First Touch Only); xác lập thứ tự ưu tiên dứt điểm: `INVALIDATED` > `TESTED` > `EXPIRED`.
@@ -34,6 +34,11 @@
   3. *Loại bỏ fallback $p_1 == p_2$ khi thiếu ATR:* Bắt buộc phải có giá trị biến động thị trường hợp lệ ($ATR(H1, 14) > 0$) mới đánh giá điều kiện biên độ EQH/EQL; tuyệt đối không dùng so sánh bằng tuyệt đối khi chưa có ATR.
   4. *Chuẩn hóa hàm `load_liquidity` & Bảo toàn Pool còn sống:* Khi chỉ định `warmup_months`, ngày bắt đầu nạp được lùi chính xác bằng `start_date - pd.DateOffset(months=warmup_months)`. Điều kiện bảo toàn pool khi lọc lịch sử được chuẩn hóa thành $t_{\text{term}} \ge T_{\text{start}}$ (thay vì $>$) để bảo toàn các pool kết thúc đúng tại $T_{\text{start}}$.
   5. *Đồng bộ hóa Naming Convention trong Schema:* Chuỗi `source_id` cho phiên Á được định danh chuẩn hóa thành `"asian_high_YYYY-MM-DD"` và `"asian_low_YYYY-MM-DD"` (thay vì `"asia_YYYY-MM-DD"`), tránh trùng lặp giữa đỉnh và đáy.
+- **V2-13 (Bổ sung cột absorbed_by, Oracle hai chiều & Kiểm thử tích hợp Ca 8 với load_liquidity - v2.3.2):**
+  1. *Schema truy vết chuỗi hấp thụ:* Bổ sung cột `absorbed_by` (Int64/NaN) vào bảng `lifecycle_df` (Mục 5.3) để định danh chính xác `pool_id` của EQH/EQL đã hấp thụ swing tương ứng (áp dụng cho cả Swing 1, 2 và các Swing hấp thụ chuỗi tiếp theo; các sự kiện khác mang giá trị NaN).
+  2. *Tích hợp kiểm thử Ca 8 với hàm load_liquidity thật:* Nâng cấp Ca 8 trong `test_liquidity.py` kiểm tra trực tiếp hàm `load_liquidity` trên dữ liệu thực tế DuckDB qua mock kiểm soát, khẳng định bảo toàn pool kết thúc đúng tại $T_{\text{start}}$ ($t_{\text{term}} \ge T_{\text{start}}$) và chứng minh bằng thực nghiệm: nạp warm-up 24 tháng bảo toàn 49 pool còn sống lúc 00:00 ngày 01/01/2018 (so với 42 pool nếu không warm-up).
+  3. *Khép kín Oracle độc lập:* Bổ sung kiểm tra oracle hướng hình thành EQH/EQL hai chiều, kiểm tra không vi phạm trước khi hấp thụ, kiểm tra tuổi hợp lệ khi bị hấp thụ, và kiểm tra trường `absorbed_by` trỏ đúng loại pool.
+  4. *Chuẩn hóa docstrings Mục 5:* Cập nhật docstrings hàm `detect_liquidity_pools` và `load_liquidity` phản ánh chính xác các quy tắc của Mục 5.
 
 ---
 
