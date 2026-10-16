@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -78,21 +79,161 @@ def _make_base_df(n_bars: int = 50, start_time: str = "2024-01-01 00:00:00", bas
     return df
 
 
+def _oracle_verify_eqh_eql(
+    df: pd.DataFrame,
+    pools_df: pd.DataFrame,
+    sweeps_df: pd.DataFrame,
+    k: int = DEFAULT_K,
+    m: int = DEFAULT_M,
+    eps: float = DEFAULT_EPSILON,
+    include_types: Sequence[str] | None = None,
+) -> None:
+    """Oracle độc lập kiểm chứng 2 chiều việc hình thành EQH và EQL.
+
+    Chiều 1: Mọi dòng EQH/EQL trong pools_df bắt buộc phải thỏa mãn đúng 4 điều kiện.
+    Chiều 2: Mọi cặp swing liên tiếp thỏa mãn 4 điều kiện (và không bị hấp thụ chuỗi)
+             bắt buộc phải sinh ra đúng một pool EQH/EQL tương ứng.
+    """
+    atr_arr = df["atr"].values if "atr" in df.columns else compute_wilder_atr(df["high"].values, df["low"].values, df["close"].values, 14)
+    swings_df = detect_swings(df, k=k)
+
+    for stype, ptype, is_buy in [("HIGH", "EQH", True), ("LOW", "EQL", False)]:
+        if include_types is not None and ptype not in include_types:
+            continue
+
+        st_swings = swings_df[swings_df["swing_type"] == stype].to_dict("records")
+        st_pools = pools_df[pools_df["pool_type"] == ptype]
+
+        # --- Chiều 1: Mọi dòng EQH/EQL trong pools_df phải thỏa 4 điều kiện ---
+        for _, eq_pool in st_pools.iterrows():
+            src = str(eq_pool["source_id"])
+            parts = src.split("_")
+            if len(parts) < 3:
+                raise AssertionError(f"source_id của {ptype} không chuẩn: {src}")
+            s1_id, s2_id = int(parts[1]), int(parts[2])
+            s1_candidates = [s for s in st_swings if s["swing_id"] == s1_id]
+            s2_candidates = [s for s in st_swings if s["swing_id"] == s2_id]
+            if not s1_candidates or not s2_candidates:
+                raise AssertionError(f"Không tìm thấy swing cấu thành {s1_id} hoặc {s2_id} cho {ptype} {src}")
+            s1 = s1_candidates[0]
+            s2 = s2_candidates[0]
+
+            j1, p1 = s1["bar_index"], s1["price"]
+            j2, p2 = s2["bar_index"], s2["price"]
+            t2 = j2 + k
+            atr_ref = atr_arr[j2] if (j2 < len(atr_arr) and not np.isnan(atr_arr[j2])) else 0.0
+
+            # Điều kiện 1: Khoảng cách j2 - j1 <= m
+            if j2 - j1 > m:
+                raise AssertionError(f"{src}: Vi phạm khoảng cách j2 - j1 = {j2 - j1} > {m}")
+            # Điều kiện 2: Swing 1 phải còn ACTIVE tại t2 (không bị vi phạm từ j1 + k + 1 đến t2)
+            for t in range(j1 + k + 1, t2 + 1):
+                if is_buy and df.loc[t, "high"] > p1:
+                    raise AssertionError(f"{src}: Swing 1 bị vi phạm High tại bar {t} trước khi xác nhận s2 tại {t2}")
+                elif not is_buy and df.loc[t, "low"] < p1:
+                    raise AssertionError(f"{src}: Swing 1 bị vi phạm Low tại bar {t} trước khi xác nhận s2 tại {t2}")
+            # Điều kiện 3: Dung sai |p1 - p2| <= eps * atr_ref
+            if abs(p1 - p2) > eps * atr_ref + 1e-9:
+                raise AssertionError(f"{src}: Vi phạm dung sai |p1 - p2| = {abs(p1 - p2)} > {eps * atr_ref}")
+            # Điều kiện 4: Hướng giá (p2 <= p1 cho HIGH, p2 >= p1 cho LOW)
+            if is_buy and p2 > p1:
+                raise AssertionError(f"{src}: Vi phạm hướng giá p2 = {p2} > p1 = {p1}")
+            elif not is_buy and p2 < p1:
+                raise AssertionError(f"{src}: Vi phạm hướng giá p2 = {p2} < p1 = {p1}")
+
+        # --- Chiều 2: Mọi cặp swing liên tiếp thỏa 4 điều kiện phải sinh EQH/EQL ---
+        confirmed_swings: list[dict] = []
+        active_eq_clusters: list[dict] = []
+
+        for s2 in sorted(st_swings, key=lambda s: (s["bar_index"] + k, s["bar_index"])):
+            j2, p2 = s2["bar_index"], s2["price"]
+            t2 = j2 + k
+            atr_ref = atr_arr[j2] if (j2 < len(atr_arr) and not np.isnan(atr_arr[j2])) else 0.0
+
+            if atr_ref <= 0.0:
+                confirmed_swings.append(s2)
+                continue
+
+            # Kiểm tra hấp thụ chuỗi vào cluster EQ đang active
+            absorbed_into_chain = False
+            for cl in active_eq_clusters:
+                if t2 - cl["avail_bar"] <= m:
+                    violated = False
+                    for t in range(cl["avail_bar"] + 1, t2 + 1):
+                        if is_buy and df.loc[t, "high"] > cl["price"]:
+                            violated = True
+                            break
+                        elif not is_buy and df.loc[t, "low"] < cl["price"]:
+                            violated = True
+                            break
+                    if not violated:
+                        if is_buy and (p2 <= cl["price"]) and (abs(cl["price"] - p2) <= eps * atr_ref + 1e-9):
+                            absorbed_into_chain = True
+                            break
+                        elif not is_buy and (p2 >= cl["price"]) and (abs(cl["price"] - p2) <= eps * atr_ref + 1e-9):
+                            absorbed_into_chain = True
+                            break
+
+            if not absorbed_into_chain and confirmed_swings:
+                s1 = confirmed_swings[-1]
+                j1, p1 = s1["bar_index"], s1["price"]
+                cond_dist = (j2 - j1 <= m)
+                cond_tol = (abs(p1 - p2) <= eps * atr_ref + 1e-9)
+                cond_dir = (p2 <= p1) if is_buy else (p2 >= p1)
+
+                s1_active = (t2 - (j1 + k) <= m)
+                if s1_active and cond_dist:
+                    for t in range(j1 + k + 1, t2 + 1):
+                        if is_buy and df.loc[t, "high"] > p1:
+                            s1_active = False
+                            break
+                        elif not is_buy and df.loc[t, "low"] < p1:
+                            s1_active = False
+                            break
+
+                s1_pool = pools_df[pools_df["source_id"] == f"swing_{s1['swing_id']}"]
+                if not s1_pool.empty:
+                    s1_pid = s1_pool.iloc[0]["pool_id"]
+                    s1_abs = sweeps_df[(sweeps_df["pool_id"] == s1_pid) & (sweeps_df["event_type"] == "ABSORBED") & (sweeps_df["bar_index"] < t2)]
+                    if not s1_abs.empty:
+                        s1_active = False
+
+                if cond_dist and s1_active and cond_tol and cond_dir:
+                    expected_src = f"{ptype.lower()}_{s1['swing_id']}_{s2['swing_id']}"
+                    match = pools_df[pools_df["source_id"] == expected_src]
+                    if match.empty:
+                        raise AssertionError(f"Cặp swing {s1['swing_id']} và {s2['swing_id']} thỏa 4 điều kiện nhưng không có {ptype} {expected_src}!")
+                    active_eq_clusters.append({
+                        "price": p1,
+                        "avail_bar": t2,
+                    })
+
+            confirmed_swings.append(s2)
+
+
 def _oracle_verify_sweeps(
     df: pd.DataFrame,
     pools_df: pd.DataFrame,
     sweeps_df: pd.DataFrame,
+    k: int = DEFAULT_K,
     m: int = DEFAULT_M,
+    eps: float = DEFAULT_EPSILON,
+    include_types: Sequence[str] | None = None,
 ) -> None:
     """Oracle độc lập kiểm chứng chuyển trạng thái vòng đời theo từng pool.
 
     Hoạt động độc lập cho cả 8 loại pool:
-    - Nếu pool ở trạng thái ABSORBED: phải có đúng 1 sự kiện ABSORBED tại bar_index_avail.
+    - Nếu pool ở trạng thái ABSORBED:
+      * Đúng 1 sự kiện ABSORBED tại bar_index >= bar_index_avail.
+      * Tuổi khi bị hấp thụ <= m.
+      * Tuyệt đối không bị vi phạm giá trước thời điểm bị hấp thụ.
+      * Có absorbed_by trỏ tới pool EQH/EQL hợp lệ trong pools_df.
     - Nếu không bị ABSORBED: quét trực tiếp các nến tương lai từ bar_index_avail + 1 đến avail + m.
       Nến đầu tiên có vi phạm giá (High > P cho Buy-side, Low < P cho Sell-side) quyết định
       SWEPT hoặc BROKEN theo giá Close.
       Nếu không vi phạm trong m nến: EXPIRED tại nến avail + m (nếu avail + m < len(df)).
     - Đối chiếu 1:1 kết quả của Oracle với bảng sweeps_df.
+    - Gọi oracle độc lập _oracle_verify_eqh_eql kiểm chứng 2 chiều việc hình thành EQH/EQL.
     """
     n_bars = len(df)
     bar_duration = pd.Timedelta(hours=1)
@@ -114,6 +255,28 @@ def _oracle_verify_sweeps(
             ev = pool_events.iloc[0]
             if ev["bar_index"] < avail_bar:
                 raise AssertionError(f"Pool {pid} ABSORBED tại bar {ev['bar_index']} trước avail_bar {avail_bar}")
+            # Kiểm tra tuổi <= m
+            if ev["pool_age"] > m or (ev["bar_index"] - avail_bar) > m:
+                raise AssertionError(f"Pool {pid} có tuổi khi bị ABSORBED là {ev['pool_age']} > m ({m})")
+            # Kiểm tra không bị vi phạm trước khi bị hấp thụ
+            for t in range(avail_bar + 1, int(ev["bar_index"]) + 1):
+                th = float(df.loc[t, "high"])
+                tl = float(df.loc[t, "low"])
+                if is_buy and th > p_price:
+                    raise AssertionError(f"Pool {pid} bị vi phạm High={th} > {p_price} tại nến {t} trước khi bị ABSORBED tại nến {ev['bar_index']}")
+                elif not is_buy and tl < p_price:
+                    raise AssertionError(f"Pool {pid} bị vi phạm Low={tl} < {p_price} tại nến {t} trước khi bị ABSORBED tại nến {ev['bar_index']}")
+            # Kiểm tra absorbed_by hợp lệ
+            if np.isnan(ev["absorbed_by"]):
+                raise AssertionError(f"Pool {pid} bị ABSORBED nhưng không có absorbed_by hợp lệ!")
+            abs_pid = int(ev["absorbed_by"])
+            abs_pools = pools_df[pools_df["pool_id"] == abs_pid]
+            if abs_pools.empty:
+                raise AssertionError(f"absorbed_by={abs_pid} không tồn tại trong pools_df!")
+            abs_type = abs_pools.iloc[0]["pool_type"]
+            expected_type = "EQH" if is_buy else "EQL"
+            if abs_type != expected_type:
+                raise AssertionError(f"absorbed_by={abs_pid} có pool_type={abs_type}, kỳ vọng {expected_type}")
             continue
 
         # Trường hợp 2: Pool hoạt động bình thường, duyệt tiến từ avail_bar + 1
@@ -175,6 +338,9 @@ def _oracle_verify_sweeps(
             # Pool vẫn còn đang ACTIVE ở cuối DataFrame
             if not pool_events.empty:
                 raise AssertionError(f"Pool {pid} chưa đến hạn và chưa vi phạm nhưng có sự kiện: {pool_events.to_dict('records')}")
+
+    # Kiểm chứng 2 chiều việc hình thành EQH/EQL
+    _oracle_verify_eqh_eql(df, pools_df, sweeps_df, k=k, m=m, eps=eps, include_types=include_types)
 
 
 class TestLiquidityPools(unittest.TestCase):
@@ -375,7 +541,7 @@ class TestLiquidityPools(unittest.TestCase):
             pools_full, sweeps_full = detect_liquidity_pools(df, k=k, m=m, eps=eps)
 
             # 2. Oracle độc lập kiểm chứng 100% các sự kiện vòng đời
-            _oracle_verify_sweeps(df, pools_full, sweeps_full, m=m)
+            _oracle_verify_sweeps(df, pools_full, sweeps_full, k=k, m=m, eps=eps)
 
             # 3. Kiểm tra bất biến tiền tố (Prefix Invariance) qua các điểm cắt
             for n_cut in cuts:
@@ -383,7 +549,7 @@ class TestLiquidityPools(unittest.TestCase):
                 pools_cut, sweeps_cut = detect_liquidity_pools(df_cut, k=k, m=m, eps=eps)
 
                 # Oracle kiểm chứng bản cắt
-                _oracle_verify_sweeps(df_cut, pools_cut, sweeps_cut, m=m)
+                _oracle_verify_sweeps(df_cut, pools_cut, sweeps_cut, k=k, m=m, eps=eps)
 
                 # Kiểm tra bất biến tiền tố: mọi pool hoàn thành tạo lập trước n_cut phải khớp hoàn toàn
                 confirmed_in_cut = pools_cut[pools_cut["bar_index_avail"] <= n_cut - 1]
@@ -494,6 +660,8 @@ class TestLiquidityPools(unittest.TestCase):
         # Swing 1, 2, 3 đều bị ABSORBED
         absorbed = sweeps_full[sweeps_full["event_type"] == "ABSORBED"]
         self.assertEqual(len(absorbed), 3, "Cả 3 swing high đỉnh cao đều phải bị ABSORBED vào EQH!")
+        # Cả 3 swing bị hấp thụ đều ghi nhận absorbed_by trỏ đúng vào pool_id của EQH
+        self.assertTrue((absorbed["absorbed_by"] == eqh_full["pool_id"]).all(), "Cả 3 swing bị hấp thụ phải ghi nhận absorbed_by trỏ đúng vào EQH!")
 
         # Swing 16 là pool độc lập (không bị absorbed)
         s16_pool = pools_full[pools_full["source_id"] == "swing_2"]
@@ -569,8 +737,7 @@ class TestLiquidityPools(unittest.TestCase):
         p_after = get_active_pools_at(pools_df, sweeps_df, t_term + pd.Timedelta(hours=1))
         self.assertEqual(len(p_after), 0)
 
-        # 2. Kiểm tra điều kiện biên >= (t_term == T_start)
-        # Tạo test case mà pool kết thúc đúng tại T_start
+        # 2. Kiểm tra điều kiện biên >= (t_term == T_start) gọi hàm load_liquidity thật
         df_hist = _make_base_df(n_bars=30, start_time="2024-01-01 00:00:00", base_price=2000.0)
         df_hist.loc[5, "high"] = 2050.0
         df_hist.loc[3:4, "high"] = 2020.0
@@ -581,30 +748,49 @@ class TestLiquidityPools(unittest.TestCase):
         p_hist, sw_hist = detect_liquidity_pools(df_hist, k=2, include_types=["SWING_HIGH"])
         t_term_exact = sw_hist.iloc[0]["time_available"]  # 2024-01-01 13:00:00
 
-        # Lọc thủ công mô phỏng load_liquidity với start_date = t_term_exact
-        t_start = t_term_exact
-        term_map = {sw_hist.iloc[0]["pool_id"]: t_term_exact}
-        keep_ids = set()
-        for _, p in p_hist.iterrows():
-            pid = p["pool_id"]
-            if pd.to_datetime(p["time_available"]) >= t_start:
-                keep_ids.add(pid)
-            else:
-                t_t = term_map.get(pid)
-                if t_t is not None and t_t >= t_start:
-                    keep_ids.add(pid)
+        # Gọi load_liquidity thật qua mock load_h1 với start_date = t_term_exact
+        with unittest.mock.patch("src.backtest.smc.liquidity.load_h1", return_value=df_hist):
+            p_loaded, sw_loaded = load_liquidity(
+                start_date=str(t_term_exact),
+                warmup_months=1,
+                k=2,
+                include_types=["SWING_HIGH"],
+            )
+            # Khẳng định pool swing_0 sinh trước start_date nhưng kết thúc đúng tại t_term == T_start vẫn ĐƯỢC GIỮ lại
+            p_pre = p_loaded[pd.to_datetime(p_loaded["time_available"]) < t_term_exact]
+            self.assertEqual(len(p_pre), 1, "load_liquidity với t_term == T_start bắt buộc phải giữ pool kết thúc đúng mốc!")
+            self.assertEqual(p_pre.iloc[0]["source_id"], "swing_0")
+            self.assertEqual(len(sw_loaded), 1)
+            self.assertEqual(sw_loaded.iloc[0]["time_available"], t_term_exact)
 
-        self.assertIn(0, keep_ids, "Điều kiện t_term >= t_start bắt buộc phải giữ pool kết thúc đúng tại T_start!")
-
-        # 3. Kiểm tra load_liquidity thực sự lùi ngày warm-up
-        # Nạp với warmup_months=1 tại 2024-01-15
+        # 3. Kiểm tra load_liquidity với dữ liệu DuckDB thật và khẳng định khác biệt warm-up vs không warm-up
         pools_warm, sweeps_warm = load_liquidity(start_date="2024-01-15", end_date="2024-01-20", warmup_months=1)
-        # Nạp không warm-up
         pools_nowarm, sweeps_nowarm = load_liquidity(start_date="2024-01-15", end_date="2024-01-20", warmup_months=0)
 
-        # Có warm-up phải tìm thấy các pool được tạo từ trước 15/01 còn sống tại 15/01
+        # Khẳng định khác biệt rõ rệt: bản warm-up nhiều pool hơn hẳn bản không warm-up
+        self.assertGreater(
+            len(pools_warm),
+            len(pools_nowarm),
+            f"Bản có warm-up ({len(pools_warm)}) phải nhiều pool hơn bản không warm-up ({len(pools_nowarm)})!",
+        )
+
+        # Có warm-up: tìm thấy các pool được tạo từ trước 15/01 còn sống tại 15/01
         pools_pre_15 = pools_warm[pd.to_datetime(pools_warm["time_available"]) < pd.to_datetime("2024-01-15 00:00:00")]
         self.assertGreater(len(pools_pre_15), 0, "load_liquidity với warmup_months=1 bắt buộc phải kế thừa các pool tạo trước start_date!")
+
+        # Không warm-up: tuyệt đối KHÔNG có bất kỳ pool nào sinh trước 15/01
+        pools_pre_15_nowarm = pools_nowarm[pd.to_datetime(pools_nowarm["time_available"]) < pd.to_datetime("2024-01-15 00:00:00")]
+        self.assertEqual(len(pools_pre_15_nowarm), 0, "Bản không warm-up tuyệt đối không được chứa pool trước start_date!")
+
+        # Đối chiếu một pool kết thúc đúng tại start_date trên dữ liệu thật
+        target_pre_pools = pools_warm[pd.to_datetime(pools_warm["time_available"]) < pd.to_datetime("2024-01-15")]
+        sw_pre = sweeps_warm[sweeps_warm["pool_id"].isin(set(target_pre_pools["pool_id"]))]
+        target_sw = sw_pre.iloc[0]
+        target_term = target_sw["time_available"]
+        target_source = pools_warm[pools_warm["pool_id"] == target_sw["pool_id"]].iloc[0]["source_id"]
+
+        p_bound_real, _ = load_liquidity(start_date=str(target_term), end_date="2024-01-20", warmup_months=1)
+        self.assertIn(target_source, p_bound_real["source_id"].values, f"Pool thật {target_source} kết thúc tại {target_term} phải còn trong load_liquidity!")
 
 
 if __name__ == "__main__":

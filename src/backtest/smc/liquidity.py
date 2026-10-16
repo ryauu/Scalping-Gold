@@ -16,15 +16,15 @@ Theo đặc tả SMC_SPEC.md v2.3 (Mục 5):
      * Quy tắc hấp thụ (Absorption Rule): Khi EQH/EQL hình thành, hai swing cấu thành lập tức
        chuyển sang trạng thái ABSORBED tại time_available của Swing 2.
      * Quy tắc chuỗi (Chained Absorption for Triple/Multi Highs/Lows): Nếu có swing thứ 3 tiếp tục
-       thỏa mãn mức giá của EQH/EQL đang ACTIVE và cách swing trước <= M nến, swing 3 sẽ được hấp thụ
-       vào chính pool EQH/EQL đó (gia hạn hạn tuổi pool thêm M nến), triệt tiêu hoàn toàn việc sinh
-       pool đè gây đếm lặp sự kiện quét.
+       thỏa mãn mức giá của EQH/EQL đang ACTIVE, swing 3 sẽ được hấp thụ vào chính pool EQH/EQL đó
+       mà KHÔNG gia hạn tuổi và KHÔNG sửa dòng pool (bảo toàn tính bất biến tiền tố và hạn tuổi M),
+       triệt tiêu hoàn toàn việc sinh pool đè gây đếm lặp sự kiện quét.
    - PDH / PDL (Previous Day High / Low):
      Chốt ngày giao dịch theo giờ đóng cửa New York lúc 17:00 NY (xử lý DST tự động qua zoneinfo):
      * Mùa đông (EST, UTC-5): 17:00 NY = 22:00 UTC (nến H1 nhãn 21:00 UTC, đóng lúc 22:00 UTC).
      * Mùa hè (EDT, UTC-4): 17:00 NY = 21:00 UTC (nến H1 nhãn 20:00 UTC, đóng lúc 21:00 UTC).
      * Ngày nghỉ lễ đóng sớm (Holiday Early Close): Khả dụng ngay khi nến cuối cùng trước giờ nghỉ
-       đóng cửa (ví dụ MLK Day đóng sớm lúc 19:00 UTC).
+       đóng cửa (ví dụ MLK Day đóng sớm lúc 20:00 UTC, nến 19:00 UTC đóng lúc 20:00 UTC).
      * Hạn tuổi thống nhất: Hết hạn sau M = 24 nến H1 kể từ time_available.
      * Định danh chuẩn: source_id = 'pdh_YYYY-MM-DD' và 'pdl_YYYY-MM-DD'.
    - ASIAN_HIGH / ASIAN_LOW (Biên vùng Á):
@@ -115,6 +115,7 @@ SWEEPS_COLUMNS = [
     "price_trigger",
     "pool_age",
     "close_price",
+    "absorbed_by",
 ]
 
 
@@ -464,6 +465,7 @@ def detect_liquidity_pools(
                     "price_trigger": price_trigger,
                     "pool_age": age,
                     "close_price": t_close,
+                    "absorbed_by": np.nan,
                 })
 
         active_pool_ids = [pid for pid in active_pool_ids if pid not in violated_this_bar]
@@ -507,6 +509,7 @@ def detect_liquidity_pools(
                                         "price_trigger": np.nan,
                                         "pool_age": 0,
                                         "close_price": t_close,
+                                        "absorbed_by": eqh_cand["pool_id"],
                                     })
                                     absorbed_into_chain = True
                                     break
@@ -560,6 +563,7 @@ def detect_liquidity_pools(
                                     "price_trigger": np.nan,
                                     "pool_age": t - pool1["bar_index_avail"],
                                     "close_price": t_close,
+                                    "absorbed_by": eqh_id,
                                 })
 
                                 # Hấp thụ Pool 2
@@ -574,6 +578,7 @@ def detect_liquidity_pools(
                                     "price_trigger": np.nan,
                                     "pool_age": 0,
                                     "close_price": t_close,
+                                    "absorbed_by": eqh_id,
                                 })
 
                     confirmed_swing_highs.append(s2)
@@ -606,6 +611,7 @@ def detect_liquidity_pools(
                                         "price_trigger": np.nan,
                                         "pool_age": 0,
                                         "close_price": t_close,
+                                        "absorbed_by": eql_cand["pool_id"],
                                     })
                                     absorbed_into_chain = True
                                     break
@@ -658,6 +664,7 @@ def detect_liquidity_pools(
                                     "price_trigger": np.nan,
                                     "pool_age": t - pool1["bar_index_avail"],
                                     "close_price": t_close,
+                                    "absorbed_by": eql_id,
                                 })
 
                                 pool2["state"] = "ABSORBED"
@@ -671,6 +678,7 @@ def detect_liquidity_pools(
                                     "price_trigger": np.nan,
                                     "pool_age": 0,
                                     "close_price": t_close,
+                                    "absorbed_by": eql_id,
                                 })
 
                     confirmed_swing_lows.append(s2)
@@ -700,6 +708,7 @@ def detect_liquidity_pools(
                     "price_trigger": np.nan,
                     "pool_age": age,
                     "close_price": t_close,
+                    "absorbed_by": np.nan,
                 })
 
         active_pool_ids = [pid for pid in active_pool_ids if pid not in expired_this_bar]
@@ -753,6 +762,7 @@ def detect_liquidity_pools(
         sweeps_df = pd.DataFrame(events_log)
         sweeps_df = sweeps_df[sweeps_df["pool_id"].isin(old_to_new_pool_id)].copy()
         sweeps_df["pool_id"] = sweeps_df["pool_id"].map(old_to_new_pool_id)
+        sweeps_df["absorbed_by"] = sweeps_df["absorbed_by"].map(old_to_new_pool_id)
 
         # Thứ tự ưu tiên sự kiện: SWEPT (0) -> BROKEN (1) -> EXPIRED (2) -> ABSORBED (3)
         ev_prio = {"SWEPT": 0, "BROKEN": 1, "EXPIRED": 2, "ABSORBED": 3}

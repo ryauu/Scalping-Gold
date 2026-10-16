@@ -331,6 +331,7 @@ Mô-đun `liquidity.py` xuất ra 2 bảng dữ liệu chuẩn hóa:
    - `price_trigger`: float ($High[t]$ cho High Sweep/Break, $Low[t]$ cho Low Sweep/Break, hoặc np.nan cho Expired/Absorbed)
    - `pool_age`: int (số nến từ khi pool khả dụng đến khi vi phạm: $bar\_index[t] - pool.bar\_index\_avail$)
    - `close_price`: float (giá đóng cửa của nến $t$)
+   - `absorbed_by`: int | NaN (định danh `pool_id` của EQH/EQL đã hấp thụ swing này khi `event_type == 'ABSORBED'`, hoặc np.nan cho các sự kiện khác nhằm phục vụ truy vết chuỗi hấp thụ)
 
 ---
 
