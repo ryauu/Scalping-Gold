@@ -241,7 +241,7 @@ def main():
         assert actual_entry_counts == expected_entry_counts, (
             f"Bảng số lệnh theo năm vào không khớp bảng kiểm toán: actual={actual_entry_counts}, expected={expected_entry_counts}"
         )
-        logger.info("  * [KHỚP 100%] Số lệnh từng năm vào khớp chính xác bảng kiểm toán: %s", actual_entry_counts)
+        logger.info(f"  * [KHỚP 100%] Số lệnh từng năm vào khớp chính xác bảng kiểm toán: {actual_entry_counts}")
 
         # 6.2 Kiểm tra phân rã số lệnh theo năm thoát
         by_exit_df = breakdown_by_year(trades_df, by_column="exit")
@@ -250,7 +250,7 @@ def main():
         assert actual_exit_counts == expected_exit_counts, (
             f"Bảng số lệnh theo năm thoát không khớp bảng kiểm toán: actual={actual_exit_counts}, expected={expected_exit_counts}"
         )
-        logger.info("  * [KHỚP 100%] Số lệnh từng năm thoát khớp chính xác bảng kiểm toán: %s", actual_exit_counts)
+        logger.info(f"  * [KHỚP 100%] Số lệnh từng năm thoát khớp chính xác bảng kiểm toán: {actual_exit_counts}")
 
         # 6.3 Mô phỏng hai nhánh C4(c) và assert đẳng thức bit-for-bit nhánh cùng hướng
         logger.info("  * Chạy simulate_c4c_pairs (kèm chốt chặn đẳng thức cùng hướng bit-for-bit)...")
