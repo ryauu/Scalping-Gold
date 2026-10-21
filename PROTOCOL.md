@@ -73,6 +73,43 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 | 2026-10-14 | 4 (C3) | — | C3 — Quy ước mô phỏng (bước 4) | Dữ liệu M1 là giá bid; 1 point = 0,01. Spread = trung vị spread năm đó × 1,25; slip = 5 points mỗi lần khớp (vào và ra); cột spread từng nến không dùng. BUY vào tại Open nến kế + spread + slip; SELL vào tại Open nến kế − slip. R_dist = \|giá vào đã gồm chi phí − SL\|; TP = giá vào ± 2×R_dist. Kích hoạt: BUY, SL khi bid low ≤ SL, TP khi bid high ≥ TP; SELL, SL khi bid high + spread ≥ SL, TP khi bid low + spread ≤ TP. Thoát tại mức kích hoạt: BUY trừ slip, SELL cộng slip. Kiểm tra từ chính nến vào lệnh. Gap qua SL: thoát tại Open (BUY: Open − slip; SELL: Open + spread + slip). Gap qua TP: chỉ lấy đúng mức TP. Chạm cả hai trong một nến: tính SL. Thoát cứng: nến đầu tiên có giờ ≥ 16:00 UTC, tại Open (BUY: − slip; SELL: + spread + slip). Hết dữ liệu trước 16:00: thoát tại Close nến cuối, ghi DATA_END và đếm. entry_delay được ghi lại, không dùng để lọc. | Đã chốt trước P&L |
 | 2026-10-14 | 5 (C4) | — | C4 — Đo lường (bước 5) | (a) “8 năm lịch” = 2018-2025; năm 2025 tính là một năm dù chỉ đến 30/6; điều kiện: kỳ vọng dương ở ít nhất 5 trong 8 năm. (b) Kỳ vọng = trung bình pnl_r; profit factor = tổng pnl_r dương / \|tổng pnl_r âm\|; lệnh pnl_r = 0 không tính vào bên nào. (c) Kiểm soát ngẫu nhiên: với mỗi lệnh thật, mô phỏng cả BUY và SELL cùng entry_time, cùng entry_open, cùng khoảng cách SL theo giá d = \|entry_open − SL gốc\| (SL BUY = entry_open − d, SL SELL = entry_open + d), TP = 2R theo C3, cùng chi phí. Mỗi lần mô phỏng rút ngẫu nhiên BUY hoặc SELL cho từng lệnh với xác suất 0,5; 1.000 lần; seed cố định (seed = 42); thống kê = kỳ vọng; p = (1 + số lần kỳ vọng ngẫu nhiên ≥ kỳ vọng thật) / 1001. | Đã chốt trước P&L |
 | 2026-10-16 | 6 (Quy tắc Baseline Data v2) | — | Quy tắc cập nhật Baseline PRIMARY trên dữ liệu Data v2 (Europe/Nicosia, build_data.py v2.0, tag data-v2) | (1) Nguồn dữ liệu mới Data v2 (Europe/Nicosia, build_data.py v2.0, commit dữ liệu gắn tag git data-v2) thay thế hoàn toàn dữ liệu cũ v1.0. (2) Kết quả trên Data v2 THAY THẾ HOÀN TOÀN kết quả cũ (Data v1); tuyệt đối không chọn lựa (no cherry-picking) giữa hai kết quả. (3) Tham số Baseline (Mục 4) và 5 tiêu chí PASS (Mục 5) giữ nguyên vẹn 100%. (4) Số thử nghiệm thật $N_{\text{trials}}$ KHÔNG TĂNG ($N_{\text{trials}} = 1$) do đây là khắc phục lỗi dữ liệu (data defect fix), không phải thử nghiệm chiến lược mới. (5) Chỉ chạy trên lớp Development (2018-01-01 → 2025-06-30). Bảo toàn tuyệt đối Robustness và Holdout. (6) Báo cáo song song cả hai cột để ghi nhận khách quan tác động của việc sửa lỗi múi giờ. | Đã chốt trước khi chạy lại P&L |
+| 2026-10-16 | 7 | 1 | Chạy lại Baseline PRIMARY trên lớp Development với dữ liệu Data v2 (Europe/Nicosia) | Mục 5 (đạt cả 5 điều kiện) | **FAIL** (1/5 điều kiện đạt). C1: 1.664 lệnh (PASS). C2: -0,0438R/lệnh (FAIL). C3: PF = 0,8987 (FAIL). C4: 4/8 năm dương (FAIL). C5: p = 0,2428 (FAIL, Monte Carlo 1.000 lần, seed = 42; sim mean = -0,0592R, std = 0,0216; exploratory: always BUY = -0,0626R, always SELL = -0,0568R). Chi tiết 8 năm: 2018 (-0,0191R), 2019 (-0,1276R), 2020 (+0,0180R), 2021 (-0,0975R), 2022 (+0,0308R), 2023 (-0,1471R), 2024 (+0,0216R), 2025 (+0,0060R). Tổng PnL: -72,92R; Win rate: 41,65%. Thay thế chính thức kết quả STT 1. |
+
+### Chi tiết đối chiếu kết quả Baseline PRIMARY: Dữ liệu cũ v1.0 (NY+7) vs Dữ liệu mới v2.0 (Europe/Nicosia)
+
+**1. Đối chiếu 5 điều kiện PASS trên lớp Development (2018-01-01 → 2025-06-30):**
+
+| Tiêu chí | Ngưỡng PASS | Dữ liệu cũ v1.0 (NY+7) | Dữ liệu mới v2.0 (Europe/Nicosia) | Kết luận |
+|---|---|---|---|---|
+| **Điều kiện 1: Tổng số lệnh** | $\ge 800$ lệnh | **1.668 lệnh** (PASS) | **1.664 lệnh** (PASS) | ĐẠT (giảm 4 lệnh do nến phiên Á dịch chuẩn ở các tuần DST) |
+| **Điều kiện 2: Kỳ vọng ròng** | $\ge +0,05$R/lệnh | **-0,0357R** (FAIL) | **-0,0438R** (FAIL) | KHÔNG ĐẠT (cả 2 đều âm sâu sau chi phí) |
+| **Điều kiện 3: Profit Factor** | $\ge 1,10$ | **0,9169** (FAIL) | **0,8987** (FAIL) | KHÔNG ĐẠT (cả 2 đều < 1,00) |
+| **Điều kiện 4: Số năm dương** | $\ge 5 / 8$ năm | **4 / 8 năm** (FAIL) | **4 / 8 năm** (FAIL) | KHÔNG ĐẠT (cùng 4 năm dương: 2020, 2022, 2024, 2025) |
+| **Điều kiện 5: Kiểm soát ngẫu nhiên** | $p \le 0,05$ | **$p = 0,1558$** (FAIL) | **$p = 0,2428$** (FAIL) | KHÔNG ĐẠT (không vượt qua phân phối ngẫu nhiên) |
+| **TỔNG KẾT TOÀN BỘ** | **Đạt cả 5 điều kiện** | **FAIL (1/5)** | **FAIL (1/5)** | **KẾT QUẢ THAY THẾ CHÍNH THỨC: FAIL** |
+
+**2. Bảng phân rã 8 năm lịch chi tiết (2018–2025):**
+
+| Năm | n (v1) | n (v2) | Kỳ vọng v1 (R) | Kỳ vọng v2 (R) | PF v1 | PF v2 | Win Rate v1 | Win Rate v2 | Dương? (v1) | Dương? (v2) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 2018 | 219 | 218 | -0,0170R | -0,0191R | 0,9567 | 0,9518 | 41,10% | 40,83% | Không | Không |
+| 2019 | 225 | 225 | -0,0984R | -0,1276R | 0,7822 | 0,7235 | 37,33% | 36,89% | Không | Không |
+| 2020 | 214 | 214 | +0,0236R | +0,0180R | 1,0597 | 1,0457 | 45,33% | 44,86% | **Có** | **Có** |
+| 2021 | 228 | 231 | -0,0936R | -0,0975R | 0,8081 | 0,8026 | 39,04% | 38,53% | Không | Không |
+| 2022 | 233 | 231 | +0,0271R | +0,0308R | 1,0635 | 1,0730 | 44,64% | 45,45% | **Có** | **Có** |
+| 2023 | 229 | 230 | -0,1453R | -0,1471R | 0,7199 | 0,7159 | 36,24% | 36,09% | Không | Không |
+| 2024 | 225 | 221 | +0,0264R | +0,0216R | 1,0672 | 1,0548 | 44,00% | 43,89% | **Có** | **Có** |
+| 2025 | 95 | 94 | +0,0383R | +0,0060R | 1,1343 | 1,0202 | 55,79% | 54,26% | **Có** | **Có** |
+| **Tổng** | **1.668** | **1.664** | **-0,0357R** | **-0,0438R** | **0,9169** | **0,8987** | **41,91%** | **41,65%** | **4/8** | **4/8** |
+
+**3. Thông tin tham chiếu & Cơ chế thoát lệnh (Dữ liệu mới v2.0):**
+- Tổng PnL: -72,92R (v1 là -59,56R).
+- Lệnh thắng: 693, Lệnh thua: 971, Lệnh hòa: 0.
+- Phân phối lý do thoát: TP: 153 lệnh; SL: 577 lệnh; SL_GAP: 3 lệnh; TIME 16:00 UTC: 931 lệnh; DATA_END: 0 lệnh.
+- Monte Carlo (1.000 mô phỏng, seed = 42): Mean = -0,0592R, Std = 0,0216; Always BUY = -0,0626R; Always SELL = -0,0568R.
+- Số thử nghiệm độc lập thật: $N_{\text{trials}} = 1$ (không tăng do đây là bước sửa lỗi dữ liệu).
+- Kết luận: Baseline Breakout phiên Á thuần túy chính thức **FAIL** trên Development cả trước và sau khi sửa lỗi múi giờ. Lớp Robustness và Holdout tiếp tục được bảo toàn nguyên vẹn 100%.
+
 
 
 

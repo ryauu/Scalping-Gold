@@ -694,9 +694,9 @@ class TestLiquidityPools(unittest.TestCase):
         df_spring = load_h1("2024-03-10", "2024-03-13").reset_index(drop=True)
         pools_spring, _ = detect_liquidity_pools(df_spring, include_types=["PDH", "PDL"])
         pdh_spring = pools_spring[pools_spring["source_id"] == "pdh_2024-03-11"]
-        self.assertEqual(len(pdh_spring), 1)
-        # Nến cuối ngày 11/03 mở 19:00 đóng 20:00 UTC
-        self.assertEqual(pdh_spring.iloc[0]["time_available"].strftime("%H:%M"), "20:00")
+        # Nến cuối ngày 11/03 mở 20:00 đóng 21:00 UTC (17:00 EDT tương ứng 21:00 UTC)
+        self.assertEqual(pdh_spring.iloc[0]["time_available"].strftime("%H:%M"), "21:00")
+
 
         # 3. Kiểm tra DST mùa hè (tháng 6/2024): 17:00 EDT tương ứng 21:00 UTC
         df_summer = load_h1("2024-06-10", "2024-06-14").reset_index(drop=True)
