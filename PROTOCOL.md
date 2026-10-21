@@ -66,10 +66,13 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 | 2026-10-14 | 5 (C4) | — | C4 — Đo lường (bước 5) | (a) “8 năm lịch” = 2018-2025; năm 2025 tính là một năm dù chỉ đến 30/6; điều kiện: kỳ vọng dương ở ít nhất 5 trong 8 năm. (b) Kỳ vọng = trung bình pnl_r; profit factor = tổng pnl_r dương / \|tổng pnl_r âm\|; lệnh pnl_r = 0 không tính vào bên nào. (c) Kiểm soát ngẫu nhiên: với mỗi lệnh thật, mô phỏng cả BUY và SELL cùng entry_time, cùng entry_open, cùng khoảng cách SL theo giá d = \|entry_open − SL gốc\| (SL BUY = entry_open − d, SL SELL = entry_open + d), TP = 2R theo C3, cùng chi phí. Mỗi lần mô phỏng rút ngẫu nhiên BUY hoặc SELL cho từng lệnh với xác suất 0,5; 1.000 lần; seed cố định (seed = 42); thống kê = kỳ vọng; p = (1 + số lần kỳ vọng ngẫu nhiên ≥ kỳ vọng thật) / 1001. | Đã chốt trước P&L |
 | 2026-10-16 | 6 (Quy tắc Baseline Data v2) | — | Quy tắc cập nhật Baseline PRIMARY trên dữ liệu Data v2 (Europe/Nicosia, build_data.py v2.0, tag data-v2) | (1) Nguồn dữ liệu mới Data v2 (Europe/Nicosia, build_data.py v2.0, commit dữ liệu gắn tag git data-v2) thay thế hoàn toàn dữ liệu cũ v1.0. (2) Kết quả trên Data v2 THAY THẾ HOÀN TOÀN kết quả cũ (Data v1); tuyệt đối không chọn lựa (no cherry-picking) giữa hai kết quả. (3) Tham số Baseline (Mục 4) và 5 tiêu chí PASS (Mục 5) giữ nguyên vẹn 100%. (4) Số thử nghiệm thật $N_{\text{trials}}$ KHÔNG TĂNG ($N_{\text{trials}} = 1$) do đây là khắc phục lỗi dữ liệu (data defect fix), không phải thử nghiệm chiến lược mới. (5) Chỉ chạy trên lớp Development (2018-01-01 → 2025-06-30). Bảo toàn tuyệt đối Robustness và Holdout. (6) Báo cáo song song cả hai cột để ghi nhận khách quan tác động của việc sửa lỗi múi giờ. | Đã chốt trước khi chạy lại P&L *(soạn thảo ngày 16/10 trước lần chạy, commit ngày 21/10)* |
 | 2026-10-16 | 7 | 1 | Chạy lại Baseline PRIMARY trên lớp Development với dữ liệu Data v2 (Europe/Nicosia) | Mục 5 (đạt cả 5 điều kiện) | **FAIL** (1/5 điều kiện đạt). C1: 1.664 lệnh (PASS). C2: -0,0438R/lệnh (FAIL). C3: PF = 0,8987 (FAIL). C4: 4/8 năm dương (FAIL). C5: p = 0,2428 (FAIL, Monte Carlo 1.000 lần, seed = 42; sim mean = -0,0592R, std = 0,0216; exploratory: always BUY = -0,0626R, always SELL = -0,0568R). Chi tiết 8 năm: 2018 (-0,0191R), 2019 (-0,1276R), 2020 (+0,0180R), 2021 (-0,0975R), 2022 (+0,0308R), 2023 (-0,1471R), 2024 (+0,0216R), 2025 (+0,0060R). Tổng PnL: -72,92R; Win rate: 41,65%. Thay thế chính thức kết quả STT 1. |
-| 2026-10-21 | 8 | 2 | Đăng ký thử nghiệm SMC Sweep Confirmation v1 (Lọc Sweep Thanh khoản + Xác nhận Cấu trúc & FVG) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện, với C5 điều chỉnh đa so sánh $p \le 0{,}025$ do $N_{\text{trials}} = 2$). Chi tiết đặc tả logic đóng băng xem tiểu mục 4 và 4.1 bên dưới. | (chưa chạy — đã đóng băng trước khi code và tính toán; v1.0 tag `prereg-smc-v1`, v1.1 tag `prereg-smc-v1.1`) |
+| 2026-10-21 | 8 | 2 | Đăng ký thử nghiệm SMC Sweep Confirmation v1 (Lọc Sweep Thanh khoản + Xác nhận Cấu trúc & FVG) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện, với C5 điều chỉnh đa so sánh $p \le 0{,}025$ do $N_{\text{trials}} = 2$). Chi tiết đặc tả logic đóng băng xem tiểu mục 4 và 4.1 bên dưới. | (chưa chạy — đã đóng băng trước khi code và tính toán; v1.0 tag `prereg-smc-v1`, v1.1 tag `prereg-smc-v1.1`, v1.2 tag `prereg-smc-v1.2`) |
 
 > **Ghi nhận trung thực lịch sử Git về STT 6 & STT 7:**  
 > Quy tắc STT 6 được viết trước lần chạy ngày 16/10/2026, nhưng được commit vào git ngày 21/10/2026 (commit `789654c` cho STT 6 rồi `3340cde` cho STT 7 cùng ngày 21/10 do tách/tái cấu trúc lịch sử sau khi kết quả đã có; kiểm tra bằng `git log --format='%h %ad %s' --date=iso`). Do đó, thứ tự commit trong lịch sử git không còn độc lập chứng minh STT 6 có trước lần chạy. Kết luận baseline không đổi (vẫn FAIL trên cả v1 và v2, $N_{\text{trials}} = 1$ không tăng, không gây hại). Đối với mọi đăng ký chiến lược SMC tiếp theo, bắt buộc phải commit và gắn tag git trước khi chạy bất kỳ tính toán P&L nào.
+
+> **Ghi nhận lịch sử Git về `prereg-smc-v1.1` & `prereg-smc-v1.2`:**  
+> Tag `prereg-smc-v1.1` ban đầu được gắn tại commit `967c70a` và đã push lên remote. Sau đó tag này bị cập nhật sang commit `2ff19ae` để bổ sung điều khoản thay thế (superseding clause tại C9.2 tham chiếu dòng 125 & 131). Nhằm tuân thủ tuyệt đối nguyên tắc không dịch chuyển tag đã công bố trên remote để bảo toàn dấu vết kiểm toán, tag `prereg-smc-v1.1` được khôi phục về đúng commit gốc `967c70a`, và commit `2ff19ae` cùng câu chữ hoàn thiện này được gắn tag mới chính thức là `prereg-smc-v1.2`.
 
 ### Chi tiết đối chiếu kết quả Baseline PRIMARY: Dữ liệu cũ v1.0 (NY+7) vs Dữ liệu mới v2.0 (Europe/Nicosia)
 
@@ -108,7 +111,7 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 
 ### 4. Đăng ký trước thử nghiệm SMC Sweep Confirmation v1 (STT 8 — N_trials = 2)
 
-**Trạng thái:** ĐÃ ĐÓNG BĂNG VÀ COMMIT TRƯỚC KHI CODE TÍN HIỆU VÀ TRƯỚC KHI TÍNH TOÁN P&L (Git tag v1.0: `prereg-smc-v1`; Bản v1.1 sửa đổi C9 và bổ sung C5–C11: `prereg-smc-v1.1`).
+**Trạng thái:** ĐÃ ĐÓNG BĂNG VÀ COMMIT TRƯỚC KHI CODE TÍN HIỆU VÀ TRƯỚC KHI TÍNH TOÁN P&L (Git tag v1.0: `prereg-smc-v1`; Bản v1.1: `prereg-smc-v1.1`; Bản hoàn thiện v1.2: `prereg-smc-v1.2`).
 
 #### A. Giả thuyết & Mục tiêu
 Khắc phục điểm yếu chí mạng của Baseline Breakout (bị bẫy phá vỡ giả / fakeout tại các vùng thanh khoản quan trọng) bằng cách tiếp cận theo góc nhìn Smart Money Concepts (SMC): chỉ giao dịch theo hướng đảo chiều sau khi một vùng thanh khoản quan trọng đã bị quét (`SWEPT`) và được xác nhận bởi cấu trúc thị trường đảo chiều (`CHOCH`/`BOS`) cùng khối mất cân bằng (`FVG`) hợp lưu.
@@ -178,7 +181,7 @@ Chiến lược chỉ kích hoạt tín hiệu khi chuỗi sự kiện tuần t�
 
 ---
 
-### 4.1. Quy ước Kỹ thuật & Sửa đổi Nội dung C9 (v1.1 — Git tag: `prereg-smc-v1.1`)
+### 4.1. Quy ước Kỹ thuật & Sửa đổi Nội dung C9 (v1.2 — Git tag: `prereg-smc-v1.2`)
 
 > **Khai báo Liêm chính Nghiên cứu (Pre-registration Integrity Declaration):**  
 > Toàn bộ các quy ước kỹ thuật (C5–C8, C10–C11) và sửa đổi nội dung (C9) dưới đây được soạn thảo, hoàn thiện và đóng băng TRƯỚC KHI thực hiện bất kỳ lệnh đếm tần suất tín hiệu (signal count) hay tính toán P&L nào của chiến lược STT 8 trên tập dữ liệu Development. Tuyệt đối chưa có bất kỳ số liệu kết quả nào của STT 8 được xem trước khi hoàn tất đăng ký v1.1.  
