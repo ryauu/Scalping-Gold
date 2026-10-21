@@ -1,9 +1,9 @@
 # SMC_SPEC.md — Đặc tả kỹ thuật các thành phần Smart Money Concepts (SMC)
 
-**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.2 (Tag: `smc-spec-v2.3.2`)**  
-*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.2 là việc hoàn thiện schema truy vết (cột absorbed_by), kiểm chứng thực nghiệm độc lập bằng kiểm thử hồi quy đối chiếu warm-up với dữ liệu thật và khép kín oracle hai chiều TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
+**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.3 (Tag: `smc-spec-v2.3.3`)**  
+*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.3 là chuẩn hóa kiểu float64 cho schema absorbed_by, đồng bộ nguồn dữ liệu chuẩn hóa Data v2 (Europe/Nicosia) theo DATA.md, cập nhật mốc giờ khả dụng PDH chuyển giao DST trong kiểm thử Ca 7 và khép kín hồ sơ TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
 
-### Nhật ký hiệu chỉnh từ v1 sang v2.3.2 (Changelog):
+### Nhật ký hiệu chỉnh từ v1 sang v2.3.3 (Changelog):
 - **V2-1 (Khởi tạo xu hướng từ NEUTRAL):** Đổi tên sự kiện phá vỡ đầu tiên từ `NEUTRAL` thành `BULLISH_INIT_BREAK` / `BEARISH_INIT_BREAK` thay vì gọi là BOS. Khẳng định đây là sự kiện khởi tạo xu hướng, không dùng làm tín hiệu giao dịch tiếp diễn.
 - **V2-2 (Định nghĩa "Gần nhất" của Protected Level):** Quy định rõ ràng là gần nhất theo thời gian (`time_available`), với `bar_index` làm tie-breaker, loại bỏ cách hiểu theo mức giá.
 - **V2-3 (Vòng đời FVG):** Sự kiện `TESTED` chỉ ghi nhận đúng 1 lần duy nhất (First Touch Only); xác lập thứ tự ưu tiên dứt điểm: `INVALIDATED` > `TESTED` > `EXPIRED`.
@@ -35,14 +35,19 @@
   4. *Chuẩn hóa hàm `load_liquidity` & Bảo toàn Pool còn sống:* Khi chỉ định `warmup_months`, ngày bắt đầu nạp được lùi chính xác bằng `start_date - pd.DateOffset(months=warmup_months)`. Điều kiện bảo toàn pool khi lọc lịch sử được chuẩn hóa thành $t_{\text{term}} \ge T_{\text{start}}$ (thay vì $>$) để bảo toàn các pool kết thúc đúng tại $T_{\text{start}}$.
   5. *Đồng bộ hóa Naming Convention trong Schema:* Chuỗi `source_id` cho phiên Á được định danh chuẩn hóa thành `"asian_high_YYYY-MM-DD"` và `"asian_low_YYYY-MM-DD"` (thay vì `"asia_YYYY-MM-DD"`), tránh trùng lặp giữa đỉnh và đáy.
 - **V2-13 (Bổ sung cột absorbed_by, Oracle hai chiều & Kiểm thử tích hợp Ca 8 với load_liquidity - v2.3.2):**
-  1. *Schema truy vết chuỗi hấp thụ:* Bổ sung cột `absorbed_by` (kiểu float64 với ngữ nghĩa int | NaN) vào bảng `lifecycle_df` (Mục 5.3) để định danh chính xác `pool_id` của EQH/EQL đã hấp thụ swing tương ứng (áp dụng cho cả Swing 1, 2 và các Swing hấp thụ chuỗi tiếp theo; các sự kiện khác mang giá trị np.nan).
+  1. *Schema truy vết chuỗi hấp thụ:* Bổ sung cột `absorbed_by` (Int64/NaN) vào bảng `lifecycle_df` (Mục 5.3) để định danh chính xác `pool_id` của EQH/EQL đã hấp thụ swing tương ứng (áp dụng cho cả Swing 1, 2 và các Swing hấp thụ chuỗi tiếp theo; các sự kiện khác mang giá trị NaN).
   2. *Tích hợp kiểm thử Ca 8 với hàm load_liquidity thật:* Nâng cấp Ca 8 trong `test_liquidity.py` kiểm tra trực tiếp hàm `load_liquidity` trên dữ liệu thực tế DuckDB qua mock kiểm soát, khẳng định bảo toàn pool kết thúc đúng tại $T_{\text{start}}$ ($t_{\text{term}} \ge T_{\text{start}}$) và chứng minh bằng thực nghiệm: nạp warm-up 24 tháng bảo toàn 49 pool còn sống lúc 00:00 ngày 01/01/2018 (so với 42 pool nếu không warm-up).
   3. *Khép kín Oracle độc lập:* Bổ sung kiểm tra oracle hướng hình thành EQH/EQL hai chiều, kiểm tra không vi phạm trước khi hấp thụ, kiểm tra tuổi hợp lệ khi bị hấp thụ, và kiểm tra trường `absorbed_by` trỏ đúng loại pool.
   4. *Chuẩn hóa docstrings Mục 5:* Cập nhật docstrings hàm `detect_liquidity_pools` và `load_liquidity` phản ánh chính xác các quy tắc của Mục 5.
+- **V2-14 (Chuẩn hóa float64 absorbed_by, Đồng bộ dữ liệu Data v2 & Cập nhật mốc chuyển DST Ca 7 - v2.3.3):**
+  1. *Chuẩn hóa kiểu dữ liệu absorbed_by:* Chuẩn hóa kiểu cột `absorbed_by` thành `float64` (với ngữ nghĩa số nguyên `int` hoặc `np.nan` khi không có giá trị) để tương thích tuyệt đối với chuẩn biểu diễn số thực thiếu trong pandas/numpy và đồng nhất giữa các hàm phát hiện và load.
+  2. *Bắt buộc sử dụng Dữ liệu Data v2 & Liên kết Erratum:* Toàn bộ các mô-đun SMC (`swings.py`, `structure.py`, `fvg.py`, `liquidity.py`, `signals.py`) và mọi kết quả kiểm định chính thức BẮT BUỘC sử dụng nguồn dữ liệu chuẩn hóa Data v2 (`data/clean/GOLD_M1_utc` và `data/derived/GOLD_H1_utc` theo múi giờ `Europe/Nicosia`, tuân thủ EU DST) theo hồ sơ tại [`DATA.md`](file:///c:/Users/duy/OneDrive/Desktop/Scalping%20Gold/DATA.md) và tag `data-v2`. Mọi kết quả trên dữ liệu cũ v1.0 bị bãi bỏ hoàn toàn theo biên bản Erratum tại Mục 4 của [`DATA.md`](file:///c:/Users/duy/OneDrive/Desktop/Scalping%20Gold/DATA.md).
+  3. *Cập nhật thời điểm khả dụng PDH chuyển giao DST (Kiểm thử Ca 7):* Trong Ca 7 (`test_liquidity.py`), do dữ liệu v2 đồng bộ chính xác múi giờ Châu Âu / Mỹ, vào ngày chuyển đổi DST mùa xuân 11/03/2024 (Mỹ vào EDT UTC-4), phiên New York kết thúc lúc 17:00 EDT tương ứng chính xác với 21:00 UTC (thay vì 20:00 UTC như dữ liệu lỗi v1.0). Khẳng định kiểm thử được cập nhật thành `self.assertEqual(pdh_spring.iloc[0]["time_available"].strftime("%H:%M"), "21:00")`.
 
 ---
 
 ## 1. Khung thời gian & Dữ liệu chuẩn
+- **Nguồn dữ liệu chuẩn hóa:** Bắt buộc sử dụng nguồn dữ liệu chuẩn hóa **Data v2.0** (`Europe/Nicosia`, tuân thủ EU DST) đã qua kiểm chứng toàn diện theo hồ sơ tại [`DATA.md`](file:///c:/Users/duy/OneDrive/Desktop/Scalping%20Gold/DATA.md) (git tag `data-v2`), bãi bỏ toàn bộ dữ liệu lỗi múi giờ v1.0 theo biên bản Erratum.
 - **Khung thời gian cấu trúc chính:** **H1** (nến 1 giờ UTC). Được tổng hợp từ dữ liệu M1 sạch trong `data/meta.duckdb` (view `h1_utc`), kèm chỉ báo biến động $ATR(H1, 14)$ tính theo chuẩn Wilder không look-ahead.
 - **Quy ước nhãn thời gian H1:** Nhãn `time_utc` của nến H1 là giờ **MỞ** nến theo chuẩn UTC naive (ví dụ `08:00:00` là nến chạy từ `08:00:00` đến `08:59:59`).
 - **Thời điểm đóng nến H1:** `close_time = open_time + 1 hour` (nến nhãn `08:00:00` đóng cửa hoàn chỉnh lúc `09:00:00`).
@@ -336,7 +341,7 @@ Mô-đun `liquidity.py` xuất ra 2 bảng dữ liệu chuẩn hóa:
    - `price_trigger`: float ($High[t]$ cho High Sweep/Break, $Low[t]$ cho Low Sweep/Break, hoặc np.nan cho Expired/Absorbed)
    - `pool_age`: int (số nến từ khi pool khả dụng đến khi vi phạm: $bar\_index[t] - pool.bar\_index\_avail$)
    - `close_price`: float (giá đóng cửa của nến $t$)
-   - `absorbed_by`: int | NaN (định danh `pool_id` của EQH/EQL đã hấp thụ swing này khi `event_type == 'ABSORBED'`, hoặc np.nan cho các sự kiện khác nhằm phục vụ truy vết chuỗi hấp thụ)
+   - `absorbed_by`: float64 (ngữ nghĩa `int` hoặc `np.nan`: định danh `pool_id` của EQH/EQL đã hấp thụ swing này khi `event_type == 'ABSORBED'`, hoặc `np.nan` cho các sự kiện khác nhằm phục vụ truy vết chuỗi hấp thụ)
 
 ---
 
