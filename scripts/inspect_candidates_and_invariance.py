@@ -345,12 +345,9 @@ def verify_empirical_prefix_invariance():
         logger.info(f"  Số tín hiệu tập cắt (sig_sub)     : {len(sig_sub)}")
         logger.info(f"  Số tín hiệu kỳ vọng từ bản full   : {len(expected)}")
 
-        # So khớp số lượng
-        # Chú ý: Ở những tín hiệu gần mép cuối t_cut, vị thế trên bản cắt có thể bị DATA_END
-        # do dữ liệu M1 kết thúc tại t_cut thay vì chạy đủ 24 thanh H1.
-        # Chúng ta phân tích chi tiết sự so khớp:
-        common_len = min(len(sig_sub), len(expected))
-        logger.info(f"  Số tín hiệu chung để so khớp chi tiết: {common_len}")
+        # 1. Khẳng định độ dài tín hiệu bằng nhau tuyệt đối (chặn triệt để việc chỉ so phần chung)
+        assert len(sig_sub) == len(expected), f"Lệch số lượng tín hiệu tại {cut_str}: {len(sig_sub)} != {len(expected)}"
+        logger.info(f"  -> [ASSERT ĐỘ DÀI ĐẠT] len(sig_sub) == len(expected) == {len(sig_sub)}")
 
         cols_to_check = [
             "direction", "candle_c_time", "close_time_c", "sweep_s_time",
@@ -358,7 +355,7 @@ def verify_empirical_prefix_invariance():
         ]
 
         mismatches = 0
-        for i in range(common_len):
+        for i in range(len(sig_sub)):
             row_sub = sig_sub.iloc[i]
             row_exp = expected.iloc[i]
             for col in cols_to_check:
@@ -373,10 +370,43 @@ def verify_empirical_prefix_invariance():
                         logger.error(f"  Lệch categorical tại lệnh #{i} cột {col}: sub={val_sub}, exp={val_exp}")
                         mismatches += 1
 
-        if mismatches == 0:
-            logger.info(f"  -> [ĐẠT] 100% {common_len} tín hiệu trước mép khớp chính xác hoàn toàn về hướng, thời gian, Entry, SL, TP, R_dist!")
-        else:
-            logger.error(f"  -> [KHÔNG ĐẠT] Có {mismatches} trường hợp không khớp!")
+        # 2. So khớp các cột thoát lệnh (exit_time, exit_reason, exit_price):
+        # Đối với các lệnh có thời điểm thoát trên bản full hoàn tất TRƯỚC HOẶC TẠI t_cut:
+        # các cột thoát lệnh phải khớp chính xác 100%.
+        # Đối với lệnh vắt qua mép t_cut: trên bản cắt sẽ thoát DATA_END do hết nến M1 tại t_cut.
+        exit_cols = ["exit_time", "exit_reason", "exit_price"]
+        closed_before_cut = 0
+        boundary_cut_trades = 0
+        for i in range(len(sig_sub)):
+            row_sub = sig_sub.iloc[i]
+            row_exp = expected.iloc[i]
+            exp_exit = pd.to_datetime(row_exp["exit_time"])
+            if exp_exit <= t_cut:
+                closed_before_cut += 1
+                for col in exit_cols:
+                    val_sub = row_sub[col]
+                    val_exp = row_exp[col]
+                    if isinstance(val_sub, (float, np.floating)):
+                        if abs(val_sub - val_exp) > 1e-4:
+                            logger.error(f"  Lệch float cột thoát {col} tại lệnh #{i}: sub={val_sub}, exp={val_exp}")
+                            mismatches += 1
+                    else:
+                        if val_sub != val_exp:
+                            logger.error(f"  Lệch cột thoát {col} tại lệnh #{i}: sub={val_sub}, exp={val_exp}")
+                            mismatches += 1
+            else:
+                boundary_cut_trades += 1
+                assert row_sub["exit_reason"] == "DATA_END", (
+                    f"Lệnh #{i} ở biên nhưng exit_reason không phải DATA_END: {row_sub['exit_reason']}"
+                )
+                logger.info(
+                    f"  -> Lệnh #{i} vắt qua ranh giới cắt ({row_sub['close_time_c']} -> {exp_exit}): "
+                    f"Bản sub đóng DATA_END tại mép cắt {row_sub['exit_time']} (hợp lệ theo C5.3)."
+                )
+
+        assert mismatches == 0, f"Có {mismatches} trường hợp không khớp giá trị!"
+        logger.info(f"  -> [ĐẠT] 100% {len(sig_sub)} tín hiệu khớp chính xác hoàn toàn về hướng, thời gian, Entry, SL, TP, R_dist!")
+        logger.info(f"  -> [ĐẠT] 100% {closed_before_cut} lệnh hoàn tất trước mép cắt khớp bit-for-bit về exit_time, exit_reason, exit_price! ({boundary_cut_trades} lệnh sát biên đóng DATA_END)")
 
     logger.info("\n" + "=" * 80)
     logger.info("HOÀN TẤT KIỂM TOÁN VÀ LƯU LOG")
