@@ -223,28 +223,68 @@ class TestSMCPnLHandCalculated(unittest.TestCase):
         self.assertAlmostEqual(res1["sim_mean"], res2["sim_mean"], places=7)
 
     def test_07_simulate_c4c_pairs_same_direction_identity(self):
-        """KIỂM TOÁN C4(c): Nhánh cùng hướng trong simulate_c4c_pairs BẮT BUỘC bằng bit-for-bit với lệnh thật."""
+        """KIỂM TOÁN C4(c): Nhánh cùng hướng trong simulate_c4c_pairs BẮT BUỘC bằng bit-for-bit với lệnh thật.
+
+        Kiểm thử bao phủ toàn diện 5 kịch bản thoát lệnh:
+        1. BUY thoát bằng TIME_EXIT
+        2. SELL thoát bằng TIME_EXIT
+        3. BUY chạm Stop Loss (SL) nội nến M1
+        4. SELL chạm Take Profit (TP) nội nến M1
+        5. BUY bị trượt giá khe hở mở cửa (SL_GAP)
+        """
         from src.backtest.smc.pnl import simulate_c4c_pairs
+        from src.backtest.smc.signals import scan_position_exit_m1
 
         base_t = pd.Timestamp("2024-05-10 00:00:00")
-        h1_times = [base_t + pd.Timedelta(hours=i) for i in range(40)]
+        h1_times = [base_t + pd.Timedelta(hours=i) for i in range(72)]
         h1_df = pd.DataFrame([{
             "time_utc": t, "open": 2000.0, "high": 2010.0, "low": 1990.0, "close": 2000.0, "atr_14": 10.0
         } for t in h1_times])
 
-        # Tạo chuỗi nến M1
-        m1_times = [base_t + pd.Timedelta(minutes=i) for i in range(40 * 60)]
-        # Cho giá dao động nhẹ quanh 2000
-        m1_rows = []
-        for i, t in enumerate(m1_times):
-            m1_rows.append({
+        # Tạo chuỗi nến M1 trải dài 72 giờ (4.320 nến)
+        m1_times = [base_t + pd.Timedelta(minutes=i) for i in range(72 * 60)]
+        m1_dict = {
+            t: {
                 "time_utc": t,
                 "open": 2000.0 + (i % 5) * 0.5,
                 "high": 2002.0 + (i % 5) * 0.5,
                 "low": 1998.0 + (i % 5) * 0.5,
                 "close": 2000.0 + (i % 5) * 0.5,
-            })
-        m1_df = pd.DataFrame(m1_rows)
+            }
+            for i, t in enumerate(m1_times)
+        }
+
+        # 1. Điểm can thiệp cho Lệnh 3 (BUY chạm SL): nến 2024-05-11 05:15 có Low thủng SL 1990.0
+        t_sl_candle = pd.Timestamp("2024-05-11 05:15:00")
+        m1_dict[t_sl_candle] = {
+            "time_utc": t_sl_candle,
+            "open": 1995.0,  # Open vẫn trên SL
+            "high": 1996.0,
+            "low": 1985.0,   # Low đâm thủng SL 1990.0
+            "close": 1987.0,
+        }
+
+        # 2. Điểm can thiệp cho Lệnh 4 (SELL chạm TP): nến 2024-05-11 08:20 có Low thủng TP 1980.0
+        t_tp_candle = pd.Timestamp("2024-05-11 08:20:00")
+        m1_dict[t_tp_candle] = {
+            "time_utc": t_tp_candle,
+            "open": 1985.0,  # Open vẫn trên TP
+            "high": 1986.0,
+            "low": 1970.0,   # Low đâm thủng sâu qua TP
+            "close": 1972.0,
+        }
+
+        # 3. Điểm can thiệp cho Lệnh 5 (BUY bị SL_GAP): nến 2024-05-11 12:10 nhảy gap mở cửa dưới SL 1990.0
+        t_gap_candle = pd.Timestamp("2024-05-11 12:10:00")
+        m1_dict[t_gap_candle] = {
+            "time_utc": t_gap_candle,
+            "open": 1982.0,  # Mở cửa nhảy gap nằm sâu dưới SL 1990.0
+            "high": 1983.0,
+            "low": 1980.0,
+            "close": 1981.0,
+        }
+
+        m1_df = pd.DataFrame(list(m1_dict.values())).sort_values("time_utc").reset_index(drop=True)
 
         spreads_cfg = {
             "spread_multiplier": 1.25,
@@ -252,77 +292,123 @@ class TestSMCPnLHandCalculated(unittest.TestCase):
             "point_value_usd": 0.01,
             "yearly_median_spreads_points": {"2024": 31.0},
         }
-
-        # 1 lệnh BUY và 1 lệnh SELL
-        t_entry1 = pd.Timestamp("2024-05-10 05:00:00")
-        t_entry2 = pd.Timestamp("2024-05-10 08:00:00")
-
-        # Giả lập lệnh thật
-        # BUY: entry_open = 2000.0, sl = 1990.0
         spread_val = 31.0 * 1.25 * 0.01  # 0.3875
         slip_val = 0.05
-        entry_exec_buy = 2000.0 + spread_val + slip_val  # 2000.4375
-        sl_buy = 1990.0
-        r_dist_buy = entry_exec_buy - sl_buy  # 10.4375
-        tp_buy = entry_exec_buy + 2.0 * r_dist_buy
-
-        # Thoát lệnh thật 1 qua scan_position_exit_m1
-        from src.backtest.smc.signals import scan_position_exit_m1
-        max_h1_time = t_entry1 + pd.Timedelta(hours=24)
         split_end = pd.Timestamp("2025-06-30 23:59:00")
-        t_ex1, r_ex1, p_ex1 = scan_position_exit_m1(
-            "BUY", t_entry1, entry_exec_buy, sl_buy, tp_buy, spread_val, slip_val, m1_df, max_h1_time, split_end
-        )
-        real_pnl_1 = compute_trade_r("BUY", entry_exec_buy, p_ex1, r_dist_buy)
 
-        # SELL: entry_open = 2002.0, sl = 2012.0
-        entry_exec_sell = 2002.0 - slip_val  # 2001.95
-        sl_sell = 2012.0
-        r_dist_sell = sl_sell - entry_exec_sell  # 10.05
-        tp_sell = entry_exec_sell - 2.0 * r_dist_sell
-        t_ex2, r_ex2, p_ex2 = scan_position_exit_m1(
-            "SELL", t_entry2, entry_exec_sell, sl_sell, tp_sell, spread_val, slip_val, m1_df, t_entry2 + pd.Timedelta(hours=24), split_end
-        )
-        real_pnl_2 = compute_trade_r("SELL", entry_exec_sell, p_ex2, r_dist_sell)
-
-        trades_df = pd.DataFrame([
+        # Thiết lập 5 lệnh thử nghiệm
+        trade_configs = [
+            # Ca 1: BUY -> TIME_EXIT (24h)
             {
-                "direction": "BUY",
-                "close_time_c": t_entry1,
+                "dir": "BUY",
+                "entry_time": pd.Timestamp("2024-05-10 01:00:00"),
                 "entry_open": 2000.0,
-                "entry_exec": entry_exec_buy,
-                "sl": sl_buy,
-                "tp": tp_buy,
-                "r_dist": r_dist_buy,
-                "exit_time": t_ex1,
-                "exit_reason": r_ex1,
-                "exit_price": p_ex1,
-                "pnl_r": real_pnl_1,
+                "sl": 1990.0,
+                "expected_reason": "TIME_EXIT",
             },
+            # Ca 2: SELL -> TIME_EXIT (24h)
             {
-                "direction": "SELL",
-                "close_time_c": t_entry2,
-                "entry_open": 2002.0,
-                "entry_exec": entry_exec_sell,
-                "sl": sl_sell,
-                "tp": tp_sell,
-                "r_dist": r_dist_sell,
-                "exit_time": t_ex2,
-                "exit_reason": r_ex2,
-                "exit_price": p_ex2,
-                "pnl_r": real_pnl_2,
+                "dir": "SELL",
+                "entry_time": pd.Timestamp("2024-05-10 02:00:00"),
+                "entry_open": 2000.0,
+                "sl": 2010.0,
+                "expected_reason": "TIME_EXIT",
             },
-        ])
+            # Ca 3: BUY -> Chạm SL nội nến tại 05:15
+            {
+                "dir": "BUY",
+                "entry_time": pd.Timestamp("2024-05-11 05:00:00"),
+                "entry_open": 2000.0,
+                "sl": 1990.0,
+                "expected_reason": "SL",
+            },
+            # Ca 4: SELL -> Chạm TP nội nến tại 08:20
+            {
+                "dir": "SELL",
+                "entry_time": pd.Timestamp("2024-05-11 08:00:00"),
+                "entry_open": 2000.0,
+                "sl": 2010.0,
+                "expected_reason": "TP",
+            },
+            # Ca 5: BUY -> Nhảy gap mở cửa dưới SL tại 12:10 (SL_GAP)
+            {
+                "dir": "BUY",
+                "entry_time": pd.Timestamp("2024-05-11 12:00:00"),
+                "entry_open": 2000.0,
+                "sl": 1990.0,
+                "expected_reason": "SL_GAP",
+            },
+        ]
 
+        trades_list = []
+        for i, cfg in enumerate(trade_configs):
+            d = cfg["dir"]
+            t_ent = cfg["entry_time"]
+            e_open = cfg["entry_open"]
+            sl_val = cfg["sl"]
+
+            if d == "BUY":
+                e_exec = e_open + spread_val + slip_val
+                r_dist = e_exec - sl_val
+                tp_val = e_exec + 2.0 * r_dist
+            else:
+                e_exec = e_open - slip_val
+                r_dist = sl_val - e_exec
+                tp_val = e_exec - 2.0 * r_dist
+
+            max_h1_time = t_ent + pd.Timedelta(hours=24)
+            t_ex, r_ex, p_ex = scan_position_exit_m1(
+                direction=d,
+                entry_time=t_ent,
+                entry_price=e_exec,
+                sl=sl_val,
+                tp=tp_val,
+                spread=spread_val,
+                slip=slip_val,
+                m1_df=m1_df,
+                max_exit_time=max_h1_time,
+                split_end=split_end,
+            )
+            self.assertEqual(r_ex, cfg["expected_reason"], f"Ca {i+1} ({d}) không khớp lý do thoát kỳ vọng!")
+
+            pnl_r = compute_trade_r(d, e_exec, p_ex, r_dist)
+            trades_list.append({
+                "signal_id": i + 1,
+                "direction": d,
+                "close_time_c": t_ent,
+                "entry_open": e_open,
+                "entry_exec": e_exec,
+                "sl": sl_val,
+                "tp": tp_val,
+                "r_dist": r_dist,
+                "exit_time": t_ex,
+                "exit_reason": r_ex,
+                "exit_price": p_ex,
+                "pnl_r": pnl_r,
+            })
+
+        trades_df = pd.DataFrame(trades_list)
+
+        # Mô phỏng C4(c) hai nhánh
         pnl_buys, pnl_sells = simulate_c4c_pairs(
             trades_df, m1_df, h1_df, spreads_cfg=spreads_cfg, split_end_str=str(split_end)
         )
 
-        # KHẲNG ĐỊNH ĐẲNG THỨC:
-        # Lệnh 0 là BUY: nhánh BUY mô phỏng PHẢI BẰNG EXACT thực tế
-        self.assertAlmostEqual(pnl_buys[0], real_pnl_1, places=5)
-        # Lệnh 1 là SELL: nhánh SELL mô phỏng PHẢI BẰNG EXACT thực tế
-        self.assertAlmostEqual(pnl_sells[1], real_pnl_2, places=5)
+        # KHẲNG ĐỊNH ĐẲNG THỨC BIT-FOR-BIT CHO MỌI CA THOÁT LỆNH:
+        for idx, row in trades_df.iterrows():
+            dir_i = row["direction"]
+            pnl_real = row["pnl_r"]
+            reason = row["exit_reason"]
+            if dir_i == "BUY":
+                self.assertAlmostEqual(
+                    pnl_buys[idx], pnl_real, places=5,
+                    msg=f"Lệnh #{idx+1} BUY [{reason}] không khớp đẳng thức cùng hướng!"
+                )
+            else:
+                self.assertAlmostEqual(
+                    pnl_sells[idx], pnl_real, places=5,
+                    msg=f"Lệnh #{idx+1} SELL [{reason}] không khớp đẳng thức cùng hướng!"
+                )
 
     def test_08_monte_carlo_p_value_hand_calculated(self):
         """Kiểm tra công thức toán học p-value: p = (1 + n_exceed) / (N_sim + 1)."""

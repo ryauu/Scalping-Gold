@@ -1,23 +1,21 @@
 """Script chạy đánh giá P&L chính thức ĐÚNG 01 LẦN cho chiến lược SMC Sweep Confirmation v1.
 
-Tuân thủ nghiêm ngặt PROTOCOL.md (Mục 4.3, 4.4 & 4.5, prereg-smc-v1.6):
-1. Chốt chặn Git phiên bản: Bắt buộc working tree sạch sẽ và HEAD khớp đúng tag prereg-smc-v1.6.
+Tuân thủ nghiêm ngặt PROTOCOL.md (Mục 4.3, 4.4, 4.5 & 4.6, prereg-smc-v1.7):
+1. Chốt chặn Git phiên bản: Bắt buộc working tree sạch sẽ và HEAD khớp đúng tag đã đăng ký (mặc định prereg-smc-v1.7).
 2. Quản lý Log & Artifact không ghi đè: Mỗi lần chạy có mã run_id (timestamp) riêng, lưu log riêng
    và ghi tiếp vào master cumulative log (mode="a"). Artifact lưu bản versioned kèm bản latest.
 3. Phạm vi thực thi: Chỉ sinh tín hiệu và tính P&L trên lớp Development (2018-01-01 -> 2025-06-30).
    Nạp H1 từ 2014 thuần túy để warm-up ATR(14) và bộ nhớ cấu trúc/FVG. Bảo toàn tuyệt đối Holdout.
-4. Danh mục chỉ số bắt buộc:
-   - Tổng P&L (R), Kỳ vọng ròng (E), Profit Factor (PF), Win Rate (%).
-   - Cơ cấu 5 lý do thoát: TP, SL, SL_GAP, TIME_EXIT, DATA_END.
-   - Bảng phân rã 8 năm lịch (2018–2025) theo năm vào lệnh (chuẩn C4: 83/93/85/107/108/112/108/51)
-     và theo năm thoát lệnh (tham chiếu: 83/92/85/108/108/111/109/51).
-   - Max Drawdown (MDD in R) sắp xếp theo thời điểm thoát lệnh (exit_time).
-   - Kiểm soát ngẫu nhiên Monte Carlo C4(c) (1.000 hoán vị, seed = 42, p <= 0.025).
-5. Đánh giá 5 tiêu chí PASS (Gắn nhãn chính thức: Không thể PASS do thiếu mẫu 747/800).
+4. Thứ tự kiểm toán an toàn (Tránh rò rỉ P&L):
+   Toàn bộ chốt chặn số lệnh theo năm và mô phỏng C4(c) identity BẮT BUỘC thực hiện và vượt qua
+   TRƯỚC KHI in bất kỳ chỉ số hiệu năng P&L nào.
+5. Hỗ trợ chế độ kiểm tra trước (--check-only):
+   Xác minh toàn bộ các chốt chặn kỹ thuật mà không in và không lưu trữ bất kỳ chỉ số P&L nào.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import subprocess
@@ -52,10 +50,10 @@ from src.backtest.smc import (
     summarize_trades,
 )
 
-EXPECTED_PREREG_TAG = "prereg-smc-v1.6.1"
+DEFAULT_PREREG_TAG = "prereg-smc-v1.7"
 
 
-def verify_git_clean_and_tagged() -> tuple[str, list[str]]:
+def verify_git_clean_and_tagged(expected_tag: str = DEFAULT_PREREG_TAG) -> tuple[str, list[str]]:
     """Kiểm tra trạng thái Git: working tree phải sạch sẽ và HEAD phải có tag đăng ký."""
     # 1. Kiểm tra working tree
     status_proc = subprocess.run(
@@ -102,25 +100,26 @@ def verify_git_clean_and_tagged() -> tuple[str, list[str]]:
     )
     tags_at_head = [t.strip() for t in tags_proc.stdout.strip().splitlines() if t.strip()]
 
-    if EXPECTED_PREREG_TAG not in tags_at_head:
+    if expected_tag not in tags_at_head:
         raise RuntimeError(
-            f"VI PHẠM QUY TẮC ĐÓNG BĂNG: Commit hiện tại ({commit_hash}) chưa được gắn tag '{EXPECTED_PREREG_TAG}'!\n"
+            f"VI PHẠM QUY TẮC ĐÓNG BĂNG: Commit hiện tại ({commit_hash}) chưa được gắn tag '{expected_tag}'!\n"
             f"Các tag hiện có tại HEAD: {tags_at_head}\n"
-            f"Bắt buộc phải gắn đúng tag {EXPECTED_PREREG_TAG} trước khi thực thi."
+            f"Bắt buộc phải gắn đúng tag {expected_tag} trước khi thực thi."
         )
 
     return commit_hash, tags_at_head
 
 
-def setup_execution_logger(run_id: str) -> tuple[logging.Logger, Path]:
+def setup_execution_logger(run_id: str, check_only: bool = False) -> tuple[logging.Logger, Path]:
     """Khởi tạo logger lưu log riêng cho run_id và ghi tiếp vào master cumulative log."""
     log_dir = _REPO_ROOT / "logs"
     log_dir.mkdir(exist_ok=True)
 
-    run_log_file = log_dir / f"smc_pnl_run_{run_id}.log"
+    prefix = "smc_check" if check_only else "smc_pnl"
+    run_log_file = log_dir / f"{prefix}_run_{run_id}.log"
     master_log_file = log_dir / "smc_pnl_all_runs.log"
 
-    logger = logging.getLogger(f"smc_pnl_{run_id}")
+    logger = logging.getLogger(f"{prefix}_{run_id}")
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("[%(asctime)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S")
 
@@ -130,9 +129,10 @@ def setup_execution_logger(run_id: str) -> tuple[logging.Logger, Path]:
     logger.addHandler(fh_run)
 
     # 2. Master cumulative log file (luôn mở mode append 'a' để không bao giờ ghi đè)
-    fh_master = logging.FileHandler(str(master_log_file), mode="a", encoding="utf-8")
-    fh_master.setFormatter(formatter)
-    logger.addHandler(fh_master)
+    if not check_only:
+        fh_master = logging.FileHandler(str(master_log_file), mode="a", encoding="utf-8")
+        fh_master.setFormatter(formatter)
+        logger.addHandler(fh_master)
 
     # 3. Console stream
     sh = logging.StreamHandler(sys.stdout)
@@ -142,23 +142,41 @@ def setup_execution_logger(run_id: str) -> tuple[logging.Logger, Path]:
     return logger, run_log_file
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Chạy đánh giá P&L chính thức cho SMC v1 (PROTOCOL Mục 4).")
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default=DEFAULT_PREREG_TAG,
+        help=f"Tag Git đăng ký kỳ vọng tại HEAD (mặc định: {DEFAULT_PREREG_TAG})",
+    )
+    parser.add_argument(
+        "--check-only",
+        action="store_true",
+        help="Chế độ kiểm tra chốt chặn git, assert số lệnh, C4(c) identity mà KHÔNG in và KHÔNG lưu P&L",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    logger, run_log_file = setup_execution_logger(run_id)
+    logger, run_log_file = setup_execution_logger(run_id, check_only=args.check_only)
 
     try:
         logger.info("=" * 80)
-        logger.info("BẮT ĐẦU CHẠY ĐÁNH GIÁ P&L CHÍNH THỨC STT 8: SMC SWEEP CONFIRMATION V1")
+        mode_str = "KIỂM TRA TRƯỚC (--check-only)" if args.check_only else "CHẠY CHÍNH THỨC (ĐÚNG 01 LẦN)"
+        logger.info("BẮT ĐẦU ĐÁNH GIÁ STT 8: SMC SWEEP CONFIRMATION V1 [%s]", mode_str)
         logger.info("Mã phiên chạy (Run ID): %s", run_id)
         logger.info("Phạm vi: LỚP DEVELOPMENT (2018-01-01 -> 2025-06-30)")
         logger.info("=" * 80)
 
         # 1. Chốt chặn Git
-        commit_hash, tags_at_head = verify_git_clean_and_tagged()
+        commit_hash, tags_at_head = verify_git_clean_and_tagged(expected_tag=args.tag)
         logger.info("CHỐT CHẶN GIT HOÀN TẤT:")
         logger.info("  * Commit Hash : %s", commit_hash)
-        logger.info("  * Tags tại HEAD: %s (Khớp chuẩn %s)", tags_at_head, EXPECTED_PREREG_TAG)
-        logger.info("  * Working tree: SẠCH SẼ (Clean, 100%% uncommitted changes = 0)")
+        logger.info("  * Tags tại HEAD: %s (Khớp chuẩn %s)", tags_at_head, args.tag)
+        logger.info("  * Working tree: SẠCH SẼ (Clean, 0 tệp chưa commit)")
 
         start_date = "2018-01-01"
         end_date = "2025-06-30"
@@ -209,10 +227,61 @@ def main():
         assert total_entered == 747, f"Số lượng lệnh ENTERED không khớp biên bản 747: {total_entered}"
 
         # 6. Tính PnL theo R và gắn vào bảng lệnh
-        logger.info("6. Tính toán chỉ số P&L (R-multiple) cho từng lệnh...")
         trades_df = attach_pnl_r(signals_df)
 
-        # 7. Tổng kết hiệu năng cốt lõi
+        # =====================================================================
+        # CHỐT CHẶN KIỂM TOÁN AN TOÀN TRƯỚC KHI IN BẤT KỲ SỐ LIỆU P&L NÀO
+        # =====================================================================
+        logger.info("\n6. Thực hiện các chốt chặn kiểm toán độc lập...")
+
+        # 6.1 Kiểm tra phân rã số lệnh theo năm vào
+        by_entry_df = breakdown_by_year(trades_df, by_column="entry")
+        expected_entry_counts = [83, 93, 85, 107, 108, 112, 108, 51]
+        actual_entry_counts = by_entry_df["n_trades"].tolist()
+        assert actual_entry_counts == expected_entry_counts, (
+            f"Bảng số lệnh theo năm vào không khớp bảng kiểm toán: actual={actual_entry_counts}, expected={expected_entry_counts}"
+        )
+        logger.info("  * [KHỚP 100%] Số lệnh từng năm vào khớp chính xác bảng kiểm toán: %s", actual_entry_counts)
+
+        # 6.2 Kiểm tra phân rã số lệnh theo năm thoát
+        by_exit_df = breakdown_by_year(trades_df, by_column="exit")
+        expected_exit_counts = [83, 92, 85, 108, 108, 111, 109, 51]
+        actual_exit_counts = by_exit_df["n_trades"].tolist()
+        assert actual_exit_counts == expected_exit_counts, (
+            f"Bảng số lệnh theo năm thoát không khớp bảng kiểm toán: actual={actual_exit_counts}, expected={expected_exit_counts}"
+        )
+        logger.info("  * [KHỚP 100%] Số lệnh từng năm thoát khớp chính xác bảng kiểm toán: %s", actual_exit_counts)
+
+        # 6.3 Mô phỏng hai nhánh C4(c) và assert đẳng thức bit-for-bit nhánh cùng hướng
+        logger.info("  * Chạy simulate_c4c_pairs (kèm chốt chặn đẳng thức cùng hướng bit-for-bit)...")
+        pnl_buys, pnl_sells = simulate_c4c_pairs(
+            trades_df=trades_df,
+            m1_df=m1_df,
+            h1_df=h1_dev,
+            split_end_str=f"{end_date} 23:59:00",
+        )
+        logger.info("  * [KHỚP 100%] Đẳng thức C4(c) nhánh cùng hướng: ĐÃ QUA TOÀN BỘ (Bit-for-bit).")
+
+        # =====================================================================
+        # NẾU Ở CHẾ ĐỘ CHECK-ONLY: KẾT THÚC SỚM KHÔNG IN VÀ KHÔNG LƯU P&L
+        # =====================================================================
+        if args.check_only:
+            logger.info("\n" + "=" * 80)
+            logger.info("KẾT QUẢ KIỂM TRA TRƯỚC (--check-only) HOÀN TẤT THÀNH CÔNG:")
+            logger.info("  [PASS] Git working tree sạch sẽ (0 uncommitted)")
+            logger.info("  [PASS] Git HEAD có tag chuẩn: %s", args.tag)
+            logger.info("  [PASS] Tổng số lệnh: 747 lệnh (Khớp chính xác)")
+            logger.info("  [PASS] Phân rã 8 năm theo năm vào: %s", actual_entry_counts)
+            logger.info("  [PASS] Phân rã 8 năm theo năm thoát: %s", actual_exit_counts)
+            logger.info("  [PASS] Mô phỏng C4(c) identity bit-for-bit: ĐẠT 100%")
+            logger.info("  [AN TOÀN] Không in chỉ số hiệu năng và không lưu trữ P&L artifacts.")
+            logger.info("Hệ thống hoàn toàn sẵn sàng cho lệnh chạy chính thức duy nhất!")
+            logger.info("=" * 80)
+            return
+
+        # =====================================================================
+        # CHẠY CHÍNH THỨC: IN VÀ LƯU TRỮ KẾT QUẢ P&L
+        # =====================================================================
         perf_summary = summarize_trades(trades_df)
         logger.info("\n" + "=" * 80)
         logger.info("KẾT QUẢ TỔNG HỢP HIỆU SUẤT CỐT LÕI (DEVELOPMENT 2018-2025):")
@@ -229,54 +298,28 @@ def main():
             pct = (c / total_entered) * 100
             logger.info("  * %-12s: %4d lệnh (%5.2f%%)", r, c, pct)
 
-        # 8. Tính Max Drawdown sắp xếp theo thời điểm thoát lệnh (exit_time)
-        logger.info("\n8. Tính Max Drawdown theo thứ tự thời điểm thoát lệnh (exit_time)...")
+        # Tính Max Drawdown
+        logger.info("\n7. Tính Max Drawdown theo thứ tự thời điểm thoát lệnh (exit_time)...")
         dd_res = compute_drawdown_series(trades_df, sort_by_exit=True)
         mdd_r = dd_res["mdd_r"]
         peak_r = dd_res["peak_r"]
         logger.info("  * Đỉnh vốn cao nhất (Peak R)      : %+.4f R", peak_r)
         logger.info("  * Max Drawdown theo R (MDD in R)  : %.4f R", mdd_r)
 
-        # 9. Bảng phân rã 8 năm lịch chi tiết (2018–2025)
-        logger.info("\n9. Bảng phân rã chi tiết 8 năm lịch (2018–2025):")
+        # In 2 bảng phân rã
+        logger.info("\n8. Bảng phân rã chi tiết 8 năm lịch (2018–2025):")
         logger.info("--- BẢNG 1: THEO NĂM VÀO LỆNH (CHÍNH THỨC THEO C4) ---")
-        by_entry_df = breakdown_by_year(trades_df, by_column="entry")
         logger.info("\n%s", by_entry_df.to_string(index=False))
         n_pos_entry = int(by_entry_df.attrs["n_positive_years"])
         logger.info("  -> Số năm có kỳ vọng dương (theo năm vào): %d / 8 năm", n_pos_entry)
 
-        # Kiểm tra khớp bảng số liệu kiểm toán
-        expected_entry_counts = [83, 93, 85, 107, 108, 112, 108, 51]
-        actual_entry_counts = by_entry_df["n_trades"].tolist()
-        assert actual_entry_counts == expected_entry_counts, (
-            f"Bảng số lệnh theo năm vào không khớp bảng kiểm toán: actual={actual_entry_counts}, expected={expected_entry_counts}"
-        )
-        logger.info("  -> [KHỚP 100%%] Số lệnh từng năm vào khớp chính xác bảng kiểm toán: %s", actual_entry_counts)
-
         logger.info("\n--- BẢNG 2: THEO NĂM THOÁT LỆNH (THAM CHIẾU MINH BẠCH) ---")
-        by_exit_df = breakdown_by_year(trades_df, by_column="exit")
         logger.info("\n%s", by_exit_df.to_string(index=False))
         n_pos_exit = int(by_exit_df.attrs["n_positive_years"])
         logger.info("  -> Số năm có kỳ vọng dương (theo năm thoát): %d / 8 năm", n_pos_exit)
 
-        expected_exit_counts = [83, 92, 85, 108, 108, 111, 109, 51]
-        actual_exit_counts = by_exit_df["n_trades"].tolist()
-        assert actual_exit_counts == expected_exit_counts, (
-            f"Bảng số lệnh theo năm thoát không khớp bảng kiểm toán: actual={actual_exit_counts}, expected={expected_exit_counts}"
-        )
-        logger.info("  -> [KHỚP 100%%] Số lệnh từng năm thoát khớp chính xác bảng kiểm toán: %s", actual_exit_counts)
-
-        # 10. Kiểm soát ngẫu nhiên Monte Carlo C4(c) (1.000 mô phỏng, seed = 42)
-        logger.info("\n10. Chạy kiểm soát ngẫu nhiên Monte Carlo C4(c) (1.000 mô phỏng, seed = 42)...")
-        logger.info("   Đang mô phỏng hai nhánh BUY và SELL cho từng lệnh trên M1 (kèm assert nhánh cùng hướng)...")
-        pnl_buys, pnl_sells = simulate_c4c_pairs(
-            trades_df=trades_df,
-            m1_df=m1_df,
-            h1_df=h1_dev,
-            split_end_str=f"{end_date} 23:59:00",
-        )
-        logger.info("   -> Hoàn tất mô phỏng hai nhánh. Chốt chặn đẳng thức cùng hướng: ĐÃ QUA 100%%.")
-        logger.info("   Chạy 1.000 lần hoán vị Monte Carlo vector hóa (seed = 42)...")
+        # Chạy Monte Carlo permutation
+        logger.info("\n9. Chạy 1.000 lần hoán vị Monte Carlo vector hóa (seed = 42)...")
         mc_res = run_monte_carlo_permutation(
             pnl_buys=pnl_buys,
             pnl_sells=pnl_sells,
@@ -290,7 +333,7 @@ def main():
         logger.info("  * [THAM CHIẾU] Always BUY Exp     : %+.4f R", mc_res["always_buy_expectancy"])
         logger.info("  * [THAM CHIẾU] Always SELL Exp    : %+.4f R", mc_res["always_sell_expectancy"])
 
-        # 11. Đánh giá toàn bộ 5 tiêu chí PASS theo PROTOCOL Mục 5
+        # Đánh giá 5 tiêu chí PASS
         logger.info("\n" + "=" * 80)
         logger.info("ĐỐI CHIẾU 5 TIÊU CHÍ PASS TRÊN LỚP DEVELOPMENT (PROTOCOL MỤC 5):")
         logger.info("=" * 80)
@@ -321,7 +364,7 @@ def main():
         logger.info("Số thử nghiệm tích lũy cho bản tiếp theo: N_trials = 3 (FWER p <= 0.0167).")
         logger.info("=" * 80 + "\n")
 
-        # 12. Lưu trữ kết quả artifacts (kèm bản versioned theo run_id để không bị ghi đè)
+        # Lưu trữ kết quả artifacts
         artifacts_dir = _REPO_ROOT / "artifacts"
         artifacts_dir.mkdir(exist_ok=True)
 

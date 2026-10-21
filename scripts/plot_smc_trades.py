@@ -53,6 +53,7 @@ from src.backtest.smc import (
     load_liquidity,
     load_structure,
 )
+from src.backtest.smc.signals import get_friction_year, scan_position_exit_m1
 
 logging.basicConfig(
     level=logging.INFO,
@@ -113,14 +114,35 @@ def select_stratified_inspection_sample(signals_df: pd.DataFrame) -> pd.DataFram
 def audit_signal_logic_checklist(
     sample_df: pd.DataFrame,
     h1_df: pd.DataFrame,
+    m1_df: pd.DataFrame,
     sweeps_lc: pd.DataFrame,
     struct_df: pd.DataFrame,
     fvg_df: pd.DataFrame,
     fvg_lc: pd.DataFrame,
+    spreads_cfg: dict | None = None,
+    split_end_str: str = "2025-06-30 23:59:00",
 ) -> list[dict[str, Any]]:
-    """Thực hiện checklist kiểm toán logic tín hiệu 6 tiêu chí cho từng lệnh."""
+    """Thực hiện checklist kiểm toán logic tín hiệu 6 tiêu chí thực chất và độc lập cho từng lệnh.
+
+    6 Tiêu chí kiểm toán độc lập:
+    [1] Sweep s: Đúng loại pool và bị swept trước c (s < c).
+    [2] Cấu trúc c: Đúng hướng (BULLISH/BEARISH) và 1 <= c - s <= 24 hàng H1.
+    [3] FVG hợp lưu: Cùng hướng, tạo từ s+1 trở đi, không rách gap, active tại close_time_c.
+    [4] Stop Loss: Cực trị chuẩn xác trong đoạn [s, c] (sai số < 1e-4).
+    [5] Khớp lệnh, R_dist, Sàn/Trần & TP:
+        - So khớp entry_open với Open M1 tại close_time_c (hoặc Open H1 nếu nến thưa).
+        - So khớp entry_exec với công thức trượt giá/spread.
+        - R_dist thỏa mãn sàn chi phí: max(0.5 ATR, 12.5 friction) và trần an toàn: 10% giá.
+        - Take Profit = 2R chuẩn xác.
+    [6] Thoát lệnh: Quét độc lập trên nến M1, kiểm tra khớp bit-for-bit exit_time, exit_reason, exit_price.
+    """
     h1_times = pd.to_datetime(h1_df["time_utc"])
     time_to_h1_idx = {t: idx for idx, t in enumerate(h1_times)}
+
+    # Index nến M1 để tra cứu nhanh Open tại close_time_c
+    m1_times = pd.to_datetime(m1_df["time_utc"])
+    m1_time_set = set(m1_times)
+    m1_indexed = m1_df.set_index(m1_times)
 
     # Index sweeps theo time_candle (thời điểm nến H1 sweep diễn ra)
     sweeps_swept = sweeps_lc[sweeps_lc["event_type"] == "SWEPT"].copy()
@@ -164,6 +186,7 @@ def audit_signal_logic_checklist(
             })
     fvg_interval_df = pd.DataFrame(fvg_intervals)
 
+    split_end = pd.Timestamp(split_end_str)
     checklist_results = []
 
     for _, row in sample_df.iterrows():
@@ -172,15 +195,21 @@ def audit_signal_logic_checklist(
         t_s = pd.Timestamp(row["sweep_s_time"])
         t_c = pd.Timestamp(row["candle_c_time"])
         t_close_c = pd.Timestamp(row["close_time_c"])
+        entry_open = float(row["entry_open"])
         entry_exec = float(row["entry_exec"])
         sl = float(row["sl"])
         tp = float(row["tp"])
         r_dist = float(row["r_dist"])
         exit_p = float(row["exit_price"])
         exit_r = str(row["exit_reason"])
+        t_exit = pd.Timestamp(row["exit_time"])
+        year = t_close_c.year
 
         s_idx = time_to_h1_idx.get(t_s)
         c_idx = time_to_h1_idx.get(t_c)
+        next_h1_row_idx = time_to_h1_idx.get(t_close_c)
+
+        spread_price, slip_price, friction_year = get_friction_year(year, spreads_cfg)
 
         # 1. Kiểm tra Sweep s
         sweep_events = sweeps_swept[sweeps_swept["time_s_ts"] == t_s]
@@ -229,16 +258,68 @@ def audit_signal_logic_checklist(
             expected_sl = float(np.min(sub_lows))
         sl_ok = abs(sl - expected_sl) < 1e-4
 
-        # 5. Kiểm tra R_dist và TP 2R
-        rdist_ok = abs(r_dist - abs(entry_exec - sl)) < 1e-4
+        # 5. Kiểm tra Entry Open, Entry Exec, R_dist, Sàn/Trần và TP 2R
+        # 5.1 So khớp entry_open với Open M1 tại close_time_c (hoặc Open H1 nếu thưa)
+        if t_close_c in m1_time_set:
+            m1_bar = m1_indexed.loc[t_close_c]
+            expected_open = float(m1_bar["open"].iloc[0] if isinstance(m1_bar, pd.DataFrame) else m1_bar["open"])
+        else:
+            expected_open = float(h1_df["open"].iloc[next_h1_row_idx]) if next_h1_row_idx is not None else entry_open
+        entry_open_ok = abs(entry_open - expected_open) < 1e-4
+
+        # 5.2 So khớp entry_exec
+        expected_exec = entry_open + spread_price + slip_price if direction == "BUY" else entry_open - slip_price
+        entry_exec_ok = abs(entry_exec - expected_exec) < 1e-4
+
+        # 5.3 So khớp R_dist và sàn/trần
+        rdist_calc_ok = abs(r_dist - abs(entry_exec - sl)) < 1e-4
+        atr_c = float(h1_df["atr_14"].iloc[c_idx]) if (c_idx is not None and "atr_14" in h1_df.columns) else 0.0
+        cost_floor = max(0.50 * atr_c, 12.5 * friction_year)
+        safety_ceiling = 0.10 * entry_exec
+        rdist_bounds_ok = (r_dist >= cost_floor - 1e-4) and (r_dist <= safety_ceiling + 1e-4) and (r_dist > 0)
+        rdist_ok = rdist_calc_ok and rdist_bounds_ok
+
+        # 5.4 So khớp TP 2R
         expected_tp = entry_exec + 2.0 * r_dist if direction == "BUY" else entry_exec - 2.0 * r_dist
         tp_ok = abs(tp - expected_tp) < 1e-4
 
-        # 6. Kiểm tra thời gian thoát
-        t_exit = pd.Timestamp(row["exit_time"])
-        exit_ok = t_exit >= t_close_c
+        # 6. Kiểm tra thoát lệnh M1 độc lập
+        if next_h1_row_idx is not None:
+            max_h1_idx = min(next_h1_row_idx + 23, len(h1_df) - 1)
+            max_hold_time = h1_times.iloc[max_h1_idx] + pd.Timedelta(hours=1)
+        else:
+            max_hold_time = t_close_c + pd.Timedelta(hours=24)
 
-        all_passed = sweep_ok and struct_ok and fvg_ok and sl_ok and rdist_ok and tp_ok and exit_ok
+        indep_exit_time, indep_exit_reason, indep_exit_price = scan_position_exit_m1(
+            direction=direction,
+            entry_time=t_close_c,
+            entry_price=entry_exec,
+            sl=sl,
+            tp=tp,
+            spread=spread_price,
+            slip=slip_price,
+            m1_df=m1_df,
+            max_exit_time=max_hold_time,
+            split_end=split_end,
+        )
+
+        exit_time_match = (t_exit == indep_exit_time)
+        exit_reason_match = (exit_r == indep_exit_reason)
+        exit_price_match = abs(exit_p - indep_exit_price) < 1e-4
+        exit_time_order = (t_exit >= t_close_c)
+        exit_ok = exit_time_match and exit_reason_match and exit_price_match and exit_time_order
+
+        all_passed = (
+            sweep_ok
+            and struct_ok
+            and fvg_ok
+            and sl_ok
+            and entry_open_ok
+            and entry_exec_ok
+            and rdist_ok
+            and tp_ok
+            and exit_ok
+        )
 
         checklist_results.append({
             "signal_id": sid,
@@ -254,9 +335,15 @@ def audit_signal_logic_checklist(
             "struct_ok": struct_ok,
             "fvg_ok": fvg_ok,
             "sl_ok": sl_ok,
+            "entry_open_ok": entry_open_ok,
+            "entry_exec_ok": entry_exec_ok,
             "rdist_ok": rdist_ok,
+            "rdist_bounds_ok": rdist_bounds_ok,
             "tp_ok": tp_ok,
             "exit_ok": exit_ok,
+            "exit_time_match": exit_time_match,
+            "exit_reason_match": exit_reason_match,
+            "exit_price_match": exit_price_match,
             "all_passed": all_passed,
             "exit_reason": exit_r,
             "pnl_r": row["pnl_r"],
@@ -465,15 +552,15 @@ def generate_interactive_2panel_report(
             showlegend=False,
         )
 
-        # Checklist HTML Badge
         chk_badges = [
-            f"<span style='color:{'#2e7d32' if chk['sweep_ok'] else '#c62828'}'>[Sweep: {'ĐẠT' if chk['sweep_ok'] else 'LỖI'}]</span>",
+            f"<span style='color:{'#2e7d32' if chk['sweep_ok'] else '#c62828'}'>[Sweep s: {'ĐẠT' if chk['sweep_ok'] else 'LỖI'}]</span>",
             f"<span style='color:{'#2e7d32' if chk['struct_ok'] else '#c62828'}'>[Cấu trúc c: {'ĐẠT' if chk['struct_ok'] else 'LỖI'}]</span>",
             f"<span style='color:{'#2e7d32' if chk['fvg_ok'] else '#c62828'}'>[FVG hợp lưu: {'ĐẠT' if chk['fvg_ok'] else 'LỖI'}]</span>",
             f"<span style='color:{'#2e7d32' if chk['sl_ok'] else '#c62828'}'>[SL cực trị: {'ĐẠT' if chk['sl_ok'] else 'LỖI'}]</span>",
+            f"<span style='color:{'#2e7d32' if chk['entry_open_ok'] else '#c62828'}'>[Open M1: {'ĐẠT' if chk['entry_open_ok'] else 'LỖI'}]</span>",
             f"<span style='color:{'#2e7d32' if chk['rdist_ok'] else '#c62828'}'>[R_dist sàn/trần: {'ĐẠT' if chk['rdist_ok'] else 'LỖI'}]</span>",
             f"<span style='color:{'#2e7d32' if chk['tp_ok'] else '#c62828'}'>[TP 2R: {'ĐẠT' if chk['tp_ok'] else 'LỖI'}]</span>",
-            f"<span style='color:{'#2e7d32' if chk['exit_ok'] else '#c62828'}'>[Thoát M1: {'ĐẠT' if chk['exit_ok'] else 'LỖI'}]</span>",
+            f"<span style='color:{'#2e7d32' if chk['exit_ok'] else '#c62828'}'>[Thoát M1 độc lập: {'ĐẠT' if chk['exit_ok'] else 'LỖI'}]</span>",
         ]
 
         card_html = f"""
@@ -490,6 +577,12 @@ def generate_interactive_2panel_report(
         </div>
         """
         html_cards.append(card_html)
+
+    n_passed = sum(1 for r in checklist_results if r["all_passed"])
+    n_total = len(checklist_results)
+    pct_passed = (n_passed / n_total) * 100 if n_total > 0 else 0.0
+    n_failed = n_total - n_passed
+    status_color = "#2e7d32" if n_failed == 0 else "#c62828"
 
     full_page = f"""
     <!DOCTYPE html>
@@ -528,7 +621,7 @@ def generate_interactive_2panel_report(
                 <div class="stat-badge" style="color: #1565c0;">40 lệnh phân đều 8 năm (2018–2025) & 2 hướng</div>
                 <div class="stat-badge" style="color: #c62828;">4 ca biên SL_GAP</div>
                 <div class="stat-badge" style="color: #6a1b9a;">1 ca biên DATA_END</div>
-                <div class="stat-badge" style="color: #2e7d32;">Kết quả checklist 6 tiêu chí: 45 / 45 ĐẠT (0 LỖI)</div>
+                <div class="stat-badge" style="color: {status_color};">Kết quả checklist 6 tiêu chí: {n_passed} / {n_total} ĐẠT ({pct_passed:.1f}%, {n_failed} LỖI)</div>
             </div>
         </div>
         {"".join(html_cards)}
@@ -577,10 +670,11 @@ def main():
     # 3. Lấy mẫu phân tầng 45 lệnh
     sample_df = select_stratified_inspection_sample(signals_df)
 
-    # 4. Kiểm toán logic 6 tiêu chí
+    # 4. Kiểm toán logic 6 tiêu chí thực chất và độc lập
     checklist_results = audit_signal_logic_checklist(
         sample_df=sample_df,
         h1_df=h1_dev,
+        m1_df=m1_df,
         sweeps_lc=sweeps_lc,
         struct_df=struct_df,
         fvg_df=fvg_df,
@@ -588,7 +682,8 @@ def main():
     )
 
     n_passed = sum(1 for r in checklist_results if r["all_passed"])
-    logger.info("KẾT QUẢ CHECKLIST LOGIC 6 TIÊU CHÍ: %d / %d lệnh ĐẠT HOÀN TOÀN (100%%, 0 LỖI)", n_passed, len(checklist_results))
+    pct_passed = (n_passed / len(checklist_results)) * 100 if checklist_results else 0.0
+    logger.info("KẾT QUẢ CHECKLIST LOGIC 6 TIÊU CHÍ: %d / %d lệnh ĐẠT HOÀN TOÀN (%.1f%%, %d LỖI)", n_passed, len(checklist_results), pct_passed, len(checklist_results) - n_passed)
     assert n_passed == len(checklist_results), f"Phát hiện {len(checklist_results) - n_passed} lệnh vi phạm checklist logic!"
 
     # In bảng tóm tắt 45 lệnh đã duyệt
