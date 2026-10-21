@@ -8,7 +8,7 @@ Ngày ghi chú: 2026-10-21 (khởi tạo: 2026-10-13, cập nhật Data v2: 2026
 - Thông số hợp đồng MT5 (`mt5.symbol_info("GOLD")`): `point = 0.01`, `digits = 2`. Quy đổi: `1 point = 0.01` giá (ví dụ: spread 32 points = $0.32/oz).
 - Khoảng yêu cầu: từ 2001-01 đến 2026-10-13. Thô nhận về: **4.363.757 dòng**, 2001-06-04 01:00 → 2026-10-13 09:03 (giờ server).
 - Thư mục raw (bất biến): `data/raw/mt5/GOLD_M1/decf3c12/` (tên = 8 ký tự đầu của SHA-256 file nguồn; hash đầy đủ nằm trong bảng `sources` của `data/meta.duckdb`).
-- Code tạo dữ liệu: `get_data.py` (tải) và `build_data.py` (làm sạch), chạy trong Jupyter. `SCRIPT_VERSION = "2.0"`.
+- Code tạo dữ liệu: `get_data.py` (tải) và `build_data.py` (làm sạch), chạy trong Jupyter. `SCRIPT_VERSION = "2.1"`.
 
 ## 2. Phát hiện quan trọng khi tải
 MT5 trả nến thô hơn khi không có M1, và chúng lẫn vào chuỗi M1:
@@ -17,7 +17,7 @@ MT5 trả nến thô hơn khi không có M1, và chúng lẫn vào chuỗi M1:
 - **M1 thật bắt đầu 2014-06-13.** Trong cửa sổ MT5 thấy M1 từ 01:34, nhưng chuỗi 30 nến liên tiếp đầu tiên bắt đầu lúc **03:22** (giờ server) nên script cắt tại đây.
 - Đã loại **9.890** nến thô. Sau làm sạch: **4.353.867** nến M1, và **72.955** nến H1 dựng lại.
 
-## 3. Quy tắc làm sạch (build_data.py v2.0)
+## 3. Quy tắc làm sạch (build_data.py v2.1)
 1. Cắt nến thô trước mốc M1 thật (xem trên). Luôn gọi `cut_coarse_bars` trực tiếp, đối chiếu với file kỳ vọng bản chụp (`config/snapshot_expectations.json`) và bảng `sources`.
 2. Đổi giờ server sang UTC theo múi giờ chuẩn: **`Europe/Nicosia` (EET/EEST, tuân thủ lịch đổi giờ mùa hè EU DST)**:
    - Mùa đông (EET): UTC+2 (trừ 2 giờ ra UTC).

@@ -1,9 +1,9 @@
 # SMC_SPEC.md — Đặc tả kỹ thuật các thành phần Smart Money Concepts (SMC)
 
-**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.3 (Tag: `smc-spec-v2.3.3`)**  
-*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.3 là chuẩn hóa kiểu float64 cho schema absorbed_by, đồng bộ nguồn dữ liệu chuẩn hóa Data v2 (Europe/Nicosia) theo DATA.md, cập nhật mốc giờ khả dụng PDH chuyển giao DST trong kiểm thử Ca 7 và khép kín hồ sơ TRƯỚC KHI tiến hành bất kỳ thử nghiệm P&L nào.*
+**Trạng thái: BẢN ĐẶC TẢ KỸ THUẬT ĐÃ ĐÓNG BĂNG V2.3.4 (Tag: `smc-spec-v2.3.4`)**  
+*Ghi chú quan trọng: Toàn bộ các hiệu chỉnh trong bản v2.3.4 là chuyển đổi toàn bộ các liên kết tài liệu sang đường dẫn tương đối DATA.md để độc lập môi trường người dùng, kế thừa trọn vẹn bản v2.3.3 (V2-14: float64 absorbed_by, Data v2 erratum, Ca 7 DST).*
 
-### Nhật ký hiệu chỉnh từ v1 sang v2.3.3 (Changelog):
+### Nhật ký hiệu chỉnh từ v1 sang v2.3.4 (Changelog):
 - **V2-1 (Khởi tạo xu hướng từ NEUTRAL):** Đổi tên sự kiện phá vỡ đầu tiên từ `NEUTRAL` thành `BULLISH_INIT_BREAK` / `BEARISH_INIT_BREAK` thay vì gọi là BOS. Khẳng định đây là sự kiện khởi tạo xu hướng, không dùng làm tín hiệu giao dịch tiếp diễn.
 - **V2-2 (Định nghĩa "Gần nhất" của Protected Level):** Quy định rõ ràng là gần nhất theo thời gian (`time_available`), với `bar_index` làm tie-breaker, loại bỏ cách hiểu theo mức giá.
 - **V2-3 (Vòng đời FVG):** Sự kiện `TESTED` chỉ ghi nhận đúng 1 lần duy nhất (First Touch Only); xác lập thứ tự ưu tiên dứt điểm: `INVALIDATED` > `TESTED` > `EXPIRED`.
@@ -43,6 +43,7 @@
   1. *Chuẩn hóa kiểu dữ liệu absorbed_by:* Chuẩn hóa kiểu cột `absorbed_by` thành `float64` (với ngữ nghĩa số nguyên `int` hoặc `np.nan` khi không có giá trị) để tương thích tuyệt đối với chuẩn biểu diễn số thực thiếu trong pandas/numpy và đồng nhất giữa các hàm phát hiện và load.
   2. *Bắt buộc sử dụng Dữ liệu Data v2 & Liên kết Erratum:* Toàn bộ các mô-đun SMC (`swings.py`, `structure.py`, `fvg.py`, `liquidity.py`, `signals.py`) và mọi kết quả kiểm định chính thức BẮT BUỘC sử dụng nguồn dữ liệu chuẩn hóa Data v2 (`data/clean/GOLD_M1_utc` và `data/derived/GOLD_H1_utc` theo múi giờ `Europe/Nicosia`, tuân thủ EU DST) theo hồ sơ tại [`DATA.md`](DATA.md) và tag `data-v2`. Mọi kết quả trên dữ liệu cũ v1.0 bị bãi bỏ hoàn toàn theo biên bản Erratum tại Mục 4 của [`DATA.md`](DATA.md).
   3. *Cập nhật thời điểm khả dụng PDH chuyển giao DST (Kiểm thử Ca 7):* Trong Ca 7 (`test_liquidity.py`), do dữ liệu v2 đồng bộ chính xác múi giờ Châu Âu / Mỹ, vào ngày chuyển đổi DST mùa xuân 11/03/2024 (Mỹ vào EDT UTC-4), phiên New York kết thúc lúc 17:00 EDT tương ứng chính xác với 21:00 UTC (thay vì 20:00 UTC như dữ liệu lỗi v1.0). Khẳng định kiểm thử được cập nhật thành `self.assertEqual(pdh_spring.iloc[0]["time_available"].strftime("%H:%M"), "21:00")`.
+- **V2-15 (Chuyển đổi liên kết tài liệu sang đường dẫn tương đối DATA.md - v2.3.4):** Chuyển đổi toàn bộ các liên kết tài liệu từ đường dẫn tuyệt đối máy cá nhân sang liên kết tương đối [`DATA.md`](DATA.md), đảm bảo tính tương thích và độc lập hoàn toàn với môi trường máy của người dùng.
 
 ---
 

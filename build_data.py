@@ -38,7 +38,6 @@ MIN_BARS_FULL_DAY = 1000          # ngày có > 1000 nến mới coi là M1 th�
 RUN_LEN = 30                      # M1 thật = chuỗi >= 30 nến liên tiếp cách nhau đúng 1 phút
 SERVER_TZ = "Europe/Nicosia"       # Giờ server broker Síp/Đông Âu (EET: UTC+2 đông / EEST: UTC+3 hè)
 TZ_ASSUMPTION = f"server = {SERVER_TZ} (EET/EEST, EU DST rules)"
-KNOWN_RAW_SHA = "decf3c126908b13480327287c665c6922fe906751644756a1862c0feb67da541"
 
 
 def sha256_of_file(path: Path) -> str:
