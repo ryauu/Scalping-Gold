@@ -381,8 +381,33 @@ Chiến lược chỉ kích hoạt tín hiệu khi chuỗi sự kiện tuần t�
   - Việc này đã vô tình bộc lộ thông tin về tỷ lệ thắng/thua thực tế (41 TP / 747 lệnh = 5,49% chốt lời 2R; 196 SL / 747 lệnh = 26,24% dừng lỗ; 509 TIME_EXIT / 747 lệnh = 68,14% đóng theo thời gian) **TRƯỚC KHI** chạy P&L chính thức.
   - Ghi nhận trung thực rằng phân bố lý do thoát đã được quan sát trước P&L. Dù toàn bộ logic chiến lược, tham số và giá vào/ra đã được đóng băng hoàn toàn tại tag `prereg-smc-v1.2` và không bị can thiệp, sự bộc lộ này được lưu lại đầy đủ trong hồ sơ kiểm toán.
 
-- **3. Quy ước Kỹ thuật Bổ sung & Vá lỗi Kiểm thử:**
-  - *Sửa thứ tự thoát nến M1 (C5.2 & C5.3):* Trong hàm `scan_position_exit_m1`, `SL_GAP` được đưa lên kiểm tra đầu tiên trước `TIME_EXIT` để triệt tiêu lỗi nhãn `TIME_EXIT` che mất `SL_GAP`. Tại mốc `split_end`, lệnh chỉ đóng bằng `DATA_END` nếu trong nến cuối cùng không xảy ra `SL_GAP`, `SL` hoặc `TP`.
+- **3. Quy ước Kỹ thuật Bổ sung, Minh bạch Dữ liệu & Kiểm thử Thực nghiệm:**
+  - *Sửa thứ tự thoát nến M1 (C5.2 & C5.3):* Trong hàm `scan_position_exit_m1`, `SL_GAP` được đưa lên kiểm tra đầu tiên trước `TIME_EXIT` để triệt tiêu lỗi nhãn `TIME_EXIT` che mất `SL_GAP`. Chạy lại đếm trên 747 lệnh: kết quả vẫn là 509 TIME_EXIT, 192 SL, 41 TP, 4 SL_GAP, 1 DATA_END (xác nhận không có lệnh TIME_EXIT nào có Open nhảy gap qua SL tại max_exit_time). Tại mốc `split_end`, lệnh chỉ đóng bằng `DATA_END` nếu trong nến cuối cùng không xảy ra `SL_GAP`, `SL` hoặc `TP`.
   - *Vị thế mới cùng phút với thoát lệnh cũ (C8.3):* Điều kiện `close_time_c >= exit_time` cho phép một lệnh mới mở tại đúng phút :00 mà vị thế cũ đóng (khi vị thế cũ chạm SL/TP hoặc hết giờ trong nến trước đó).
-  - *Lý giải tỷ lệ `DROP_MARKET_CLOSED` (7/922 ứng viên):* Phân tích phân phối giờ nến $c$ cho thấy khung giờ 20:00 UTC (đóng lúc 21:00 UTC, sát giờ đóng cửa sàn 17:00 NY) có khối lượng giao dịch cực thấp và biến động co hẹp, chỉ xuất hiện đúng 22 ứng viên trong suốt 7.5 năm. Toàn bộ 7 nến $c$ đóng vào lúc thị trường đóng cửa (thứ Sáu 21:00 UTC hoặc trước giờ nghỉ) đều bị bắt chính xác bởi `DROP_MARKET_CLOSED`, hoàn toàn không có lỗi chỉ mục hay lệch pha.
-  - *Kiểm chứng Bất biến tiền tố trên dữ liệu thật (Real-data Full Pipeline Prefix Invariance):* Đã thực nghiệm tính toán lại 100% từ đầu toàn bộ chuỗi Swings $\to$ Structure $\to$ FVG $\to$ Liquidity $\to$ Signals từ dữ liệu H1 bị cắt tại 3 mốc thực tế (`2023-06-30`, `2023-12-31`, `2024-06-30`). Kết quả khớp chính xác 100% bit-for-bit với bản chạy đầy đủ (761/761, 802/802, 851/851), chứng minh hệ thống hoàn toàn sạch và không có bất kỳ rò rỉ nhìn trước tương lai nào.
+  - *Minh bạch việc chạm tập Robustness trong lần chạy tiền tố trước:* Script `verify_real_prefix_invariance_and_hours.py` ban đầu nạp `load_h1(start_date=None)`, dẫn đến việc phát hiện 282 tín hiệu trong giai đoạn Robustness 2014–2017 (2014: 42, 2015: 82, 2016: 93, 2017: 65). Dù hoàn toàn KHÔNG tính toán P&L hay bất kỳ chỉ số hiệu năng nào, điều này vi phạm nguyên tắc "chưa chạm" lớp Robustness được ghi nhận trước đó. Ghi nhận trung thực rằng lớp Robustness đã bị đọc và chạy thuật toán phát hiện tín hiệu trong lần chạy đó.
+  - *Kiểm thử Thực nghiệm Tính Bất biến Tiền tố trên Development (Empirical Prefix Invariance Test):* Chạy lại trên tập Development (`2018-01-01` đến `2025-06-30`), ATR(14) được tính lại từ đầu trên tập H1 cắt (không copy cột), và M1 thật được cắt theo mốc $t_{\text{cut}}$ để quét thoát lệnh thực tế và kiểm tra tương tác vị thế mở với `DROP_POSITION_BUSY`. Tại cả 2 mốc $t_{\text{cut}}$ (`2023-12-31`: 588/588 tín hiệu; `2024-06-30`: 644/644 tín hiệu), 100% tín hiệu trước mốc cắt khớp chính xác bit-for-bit với bản chạy đầy đủ về hướng, thời gian, Entry, SL, TP, R_dist. Đây là kiểm thử thực nghiệm (empirical test), không phải chứng minh toán học. Toàn bộ log được lưu tại `logs/prefix_invariance_verification.log`.
+  - *Bản chất chính xác của 7 ca `DROP_MARKET_CLOSED`:* Không phải thứ Sáu, mà là các ngày giữa tuần (Thứ Ba, Thứ Tư, Thứ Năm) có nến $c$ đóng đúng vào giờ nghỉ bảo trì hàng ngày 17:00 NY của sàn (21:00 UTC mùa hè và 22:00 UTC mùa đông). Khung giờ sát giờ nghỉ có biến động cực thấp, trong 7.5 năm chỉ có đúng 16 ứng viên (15 ứng viên giờ 20:00 UTC hè và 1 ứng viên giờ 21:00 UTC đông), trong đó chính xác 7 ca đóng vào giờ sàn đóng và bị chặn đúng bởi `DROP_MARKET_CLOSED`. Toàn bộ 922 ứng viên được phân bố: Á (26.7%), Âu (25.6%), Mỹ chính (44.0%), Cuối ngày NY (3.7%).
+
+---
+
+### 4.3. Khóa Đăng Ký Trước Bước Chạy P&L Mô Tả STT 8 (v1.4 — Git tag: `prereg-smc-v1.4`)
+
+Trước khi thực hiện lệnh tính toán P&L cho chiến lược STT 8, toàn bộ phạm vi và quy tắc báo cáo được đóng băng tuyệt đối như sau:
+
+1. **Danh mục chỉ số bắt buộc báo cáo đầy đủ:**
+   - *Tổng P&L ròng theo đơn vị R:* $\sum R$.
+   - *Kỳ vọng ròng (Expectation):* $E = \frac{\sum R}{N}$ (đơn vị R/lệnh).
+   - *Profit Factor (PF):* $PF = \frac{\sum R_{\text{win}}}{|\sum R_{\text{loss}}|}$.
+   - *Tỷ lệ thắng (Win Rate %) và cơ cấu thoát lệnh:* Báo cáo số lượng và tỷ lệ % của cả 5 lý do thoát (`TP`, `SL`, `SL_GAP`, `TIME_EXIT`, `DATA_END`).
+   - *Bảng phân rã chi tiết 8 năm lịch (2018–2025):* Số lệnh ($n$), P&L (R), Kỳ vọng (R), PF, Win Rate (%), và số năm có kỳ vọng dương (kiểm tra tiêu chí $\ge 5/8$ năm của Điều kiện 4).
+   - *Max Drawdown theo đơn vị R (MDD in R):* Mức sụt giảm tài sản lớn nhất từ đỉnh vốn tính theo R.
+   - *Kiểm soát ngẫu nhiên Monte Carlo (Điều kiện 5):* Chạy 1.000 hoán vị (seed = 42) hoán đổi ngẫu nhiên hướng BUY/SELL với cùng điểm vào và khoảng cách SL/TP để tính $p$-value so với phân phối ngẫu nhiên (ngưỡng đối chiếu: $p \le 0{,}025$ với $N_{\text{trials}} = 2$).
+2. **Quy tắc thực thi một lần duy nhất (Single Execution Rule):**
+   - Script tính toán P&L chỉ được chạy đúng **01 lần duy nhất** trên tập dữ liệu Development (`2018-01-01` đến `2025-06-30`).
+   - Tuyệt đối KHÔNG chạy lặp lại để tìm kiếm tham số tối ưu, không điều chỉnh bất kỳ tham số nào ($k=3, \gamma=0.2, m=24$, $R_{dist}$, v.v.).
+3. **Bảo vệ tuyệt đối Robustness và Holdout:**
+   - Tuyệt đối KHÔNG mở, không nạp và không tính toán P&L trên tập dữ liệu Robustness (`2014-01-01` đến `2017-12-31`) và tập dữ liệu Holdout (`2025-07-01` đến `2026-03-31`) trong bước này.
+4. **Cam kết kiểm toán & Nguyên tắc $N_{\text{trials}} = 3$:**
+   - Kết quả P&L của STT 8 là phân tích mô tả phục vụ kiểm toán khoa học, được gắn nhãn chính thức: *"FAIL Điều kiện 1 (thiếu mẫu 747/800); không dùng để lựa chọn biến thể hay tinh chỉnh tham số"*.
+   - Tuyệt đối không dùng kết quả này để chọn bất kỳ biến thể nào (kể cả biến thể bỏ quy tắc một vị thế 867 lệnh).
+   - Bất kỳ chiến lược nào được thiết kế sau đó (ví dụ STT 9 / SMC v2) bắt buộc tính là $N_{\text{trials}} = 3$ với ngưỡng FWER $p \le 0{,}0167$.

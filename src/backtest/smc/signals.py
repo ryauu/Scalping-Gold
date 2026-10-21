@@ -241,6 +241,8 @@ def scan_position_exit_m1(
     Trả về:
         (exit_time, exit_reason, exit_price)
     """
+    if hasattr(m1_df, "to_dataframe"):
+        m1_df = m1_df.to_dataframe()
     dir_clean = direction.upper()
     times_series = m1_df["time_utc"]
     if not pd.api.types.is_datetime64_any_dtype(times_series):
@@ -343,6 +345,9 @@ def generate_smc_signals(
     """
     if h1_df.empty:
         return pd.DataFrame(), {}
+
+    if m1_df is not None and hasattr(m1_df, "to_dataframe"):
+        m1_df = m1_df.to_dataframe()
 
     # Đảm bảo H1 có ATR(14)
     if "atr_14" not in h1_df.columns:

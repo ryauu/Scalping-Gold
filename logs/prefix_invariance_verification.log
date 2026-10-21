@@ -1,0 +1,68 @@
+[14:15:58] INFO: ================================================================================
+[14:15:58] INFO: MỤC 1: PHÂN TÍCH PHÂN PHỐI GIỜ UTC CỦA 922 ỨNG VIÊN VÀ CHI TIẾT 7 CA DROP_MARKET_CLOSED
+[14:15:58] INFO: ================================================================================
+[14:16:56] INFO: Tổng số ứng viên thực tế trong thác nước (CANDIDATES_RAW): 922
+[14:16:56] INFO: 
+--- BẢNG PHÂN PHỐI 922 ỨNG VIÊN THEO GIỜ UTC (MỞ NẾN c) ---
+[14:16:56] INFO:   Giờ 00:00 UTC (đóng 01:00 UTC) :  21 ứng viên (  2.3%) | #####
+[14:16:56] INFO:   Giờ 01:00 UTC (đóng 02:00 UTC) :  57 ứng viên (  6.2%) | ############
+[14:16:56] INFO:   Giờ 02:00 UTC (đóng 03:00 UTC) :  24 ứng viên (  2.6%) | #####
+[14:16:56] INFO:   Giờ 03:00 UTC (đóng 04:00 UTC) :  25 ứng viên (  2.7%) | #####
+[14:16:56] INFO:   Giờ 04:00 UTC (đóng 05:00 UTC) :  16 ứng viên (  1.7%) | ###
+[14:16:56] INFO:   Giờ 05:00 UTC (đóng 06:00 UTC) :  35 ứng viên (  3.8%) | ########
+[14:16:56] INFO:   Giờ 06:00 UTC (đóng 07:00 UTC) :  68 ứng viên (  7.4%) | ###############
+[14:16:56] INFO:   Giờ 07:00 UTC (đóng 08:00 UTC) :  57 ứng viên (  6.2%) | ############
+[14:16:56] INFO:   Giờ 08:00 UTC (đóng 09:00 UTC) :  56 ứng viên (  6.1%) | ############
+[14:16:56] INFO:   Giờ 09:00 UTC (đóng 10:00 UTC) :  43 ứng viên (  4.7%) | #########
+[14:16:56] INFO:   Giờ 10:00 UTC (đóng 11:00 UTC) :  36 ứng viên (  3.9%) | ########
+[14:16:56] INFO:   Giờ 11:00 UTC (đóng 12:00 UTC) :  44 ứng viên (  4.8%) | ##########
+[14:16:56] INFO:   Giờ 12:00 UTC (đóng 13:00 UTC) :  65 ứng viên (  7.0%) | ##############
+[14:16:56] INFO:   Giờ 13:00 UTC (đóng 14:00 UTC) :  82 ứng viên (  8.9%) | ##################
+[14:16:56] INFO:   Giờ 14:00 UTC (đóng 15:00 UTC) :  77 ứng viên (  8.4%) | #################
+[14:16:56] INFO:   Giờ 15:00 UTC (đóng 16:00 UTC) :  54 ứng viên (  5.9%) | ############
+[14:16:56] INFO:   Giờ 16:00 UTC (đóng 17:00 UTC) :  38 ứng viên (  4.1%) | ########
+[14:16:56] INFO:   Giờ 17:00 UTC (đóng 18:00 UTC) :  39 ứng viên (  4.2%) | ########
+[14:16:56] INFO:   Giờ 18:00 UTC (đóng 19:00 UTC) :  31 ứng viên (  3.4%) | #######
+[14:16:56] INFO:   Giờ 19:00 UTC (đóng 20:00 UTC) :  20 ứng viên (  2.2%) | ####
+[14:16:56] INFO:   Giờ 20:00 UTC (đóng 21:00 UTC) :  15 ứng viên (  1.6%) | ###
+[14:16:56] INFO:   Giờ 21:00 UTC (đóng 22:00 UTC) :   1 ứng viên (  0.1%) | 
+[14:16:56] INFO:   Giờ 22:00 UTC (đóng 23:00 UTC) :  12 ứng viên (  1.3%) | ###
+[14:16:56] INFO:   Giờ 23:00 UTC (đóng 00:00 UTC) :   6 ứng viên (  0.7%) | #
+[14:16:56] INFO: 
+--- PHÂN BỐ THEO PHIÊN GIAO DỊCH ---
+[14:16:56] INFO:   Phiên Á (00:00 - 06:00 UTC)        : 246 ứng viên ( 26.7%)
+[14:16:56] INFO:   Phiên Âu (07:00 - 11:00 UTC)       : 236 ứng viên ( 25.6%)
+[14:16:56] INFO:   Phiên Mỹ chính (12:00 - 19:00 UTC) : 406 ứng viên ( 44.0%)
+[14:16:56] INFO:   Cuối ngày NY (20:00 - 23:00 UTC)   :  34 ứng viên (  3.7%)
+[14:16:56] INFO: 
+--- CHI TIẾT CHÍNH XÁC 7 CA RƠI VÀO DROP_MARKET_CLOSED ---
+[14:16:56] INFO:   [1/7] Nến c mở: 2019-09-10 20:00:00 (Tuesday) -> Đóng: 2019-09-10 21:00:00 | Hướng: SELL | Thứ trong tuần: 1 (Tuesday)
+[14:16:56] INFO:   [2/7] Nến c mở: 2020-07-28 20:00:00 (Tuesday) -> Đóng: 2020-07-28 21:00:00 | Hướng: BUY | Thứ trong tuần: 1 (Tuesday)
+[14:16:56] INFO:   [3/7] Nến c mở: 2020-10-06 20:00:00 (Tuesday) -> Đóng: 2020-10-06 21:00:00 | Hướng: SELL | Thứ trong tuần: 1 (Tuesday)
+[14:16:56] INFO:   [4/7] Nến c mở: 2021-02-24 21:00:00 (Wednesday) -> Đóng: 2021-02-24 22:00:00 | Hướng: BUY | Thứ trong tuần: 2 (Wednesday)
+[14:16:56] INFO:   [5/7] Nến c mở: 2021-06-16 20:00:00 (Wednesday) -> Đóng: 2021-06-16 21:00:00 | Hướng: SELL | Thứ trong tuần: 2 (Wednesday)
+[14:16:56] INFO:   [6/7] Nến c mở: 2023-08-10 20:00:00 (Thursday) -> Đóng: 2023-08-10 21:00:00 | Hướng: SELL | Thứ trong tuần: 3 (Thursday)
+[14:16:56] INFO:   [7/7] Nến c mở: 2025-05-28 20:00:00 (Wednesday) -> Đóng: 2025-05-28 21:00:00 | Hướng: SELL | Thứ trong tuần: 2 (Wednesday)
+[14:16:56] INFO: 
+================================================================================
+[14:16:56] INFO: MỤC 2: KIỂM THỬ THỰC NGHIỆM TÍNH BẤT BIẾN TIỀN TỐ (EMPIRICAL PREFIX INVARIANCE)
+[14:16:56] INFO:        Chạy trên Development (2018-01-01 -> 2025-06-30), M1 thật, ATR tính lại hoàn toàn
+[14:16:56] INFO: ================================================================================
+[14:17:27] INFO: Chạy generate_smc_signals trên toàn bộ tập Development (kèm M1)...
+[14:17:57] INFO: Bản full sinh được: 747 tín hiệu ENTERED
+[14:17:57] INFO: 
+>>> Đang kiểm thử điểm cắt: t_cut = 2023-12-31 23:00:00 <<<
+[14:18:35] INFO:   Số tín hiệu tập cắt (sig_sub)     : 588
+[14:18:35] INFO:   Số tín hiệu kỳ vọng từ bản full   : 588
+[14:18:35] INFO:   Số tín hiệu chung để so khớp chi tiết: 588
+[14:18:36] INFO:   -> [ĐẠT] 100% 588 tín hiệu trước mép khớp chính xác hoàn toàn về hướng, thời gian, Entry, SL, TP, R_dist!
+[14:18:36] INFO: 
+>>> Đang kiểm thử điểm cắt: t_cut = 2024-06-30 23:00:00 <<<
+[14:19:17] INFO:   Số tín hiệu tập cắt (sig_sub)     : 644
+[14:19:17] INFO:   Số tín hiệu kỳ vọng từ bản full   : 644
+[14:19:17] INFO:   Số tín hiệu chung để so khớp chi tiết: 644
+[14:19:17] INFO:   -> [ĐẠT] 100% 644 tín hiệu trước mép khớp chính xác hoàn toàn về hướng, thời gian, Entry, SL, TP, R_dist!
+[14:19:17] INFO: 
+================================================================================
+[14:19:17] INFO: HOÀN TẤT KIỂM TOÁN VÀ LƯU LOG
+[14:19:17] INFO: ================================================================================
