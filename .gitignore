@@ -1,6 +1,7 @@
 # --- Dữ liệu (không commit; dựng lại bằng get_data.py + build_data.py, xem DATA.md) ---
 data/
 artifacts/
+logs/
 *.duckdb
 *.parquet
 

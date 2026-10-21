@@ -52,7 +52,7 @@ from src.backtest.smc import (
     summarize_trades,
 )
 
-EXPECTED_PREREG_TAG = "prereg-smc-v1.6"
+EXPECTED_PREREG_TAG = "prereg-smc-v1.6.1"
 
 
 def verify_git_clean_and_tagged() -> tuple[str, list[str]]:
@@ -65,11 +65,20 @@ def verify_git_clean_and_tagged() -> tuple[str, list[str]]:
         text=True,
         check=True,
     )
-    uncommitted = status_proc.stdout.strip()
-    if uncommitted:
+    raw_uncommitted = status_proc.stdout.strip()
+    # Bỏ qua các file sinh ra trong runtime logs/ và artifacts/
+    uncommitted_lines = [
+        line for line in raw_uncommitted.splitlines()
+        if line.strip() and not any(
+            line[3:].strip().replace("\\", "/").startswith(prefix)
+            for prefix in ["logs/", "artifacts/"]
+        )
+    ]
+    if uncommitted_lines:
+        uncommitted_str = "\n".join(uncommitted_lines)
         raise RuntimeError(
             f"VI PHẠM QUY TẮC ĐÓNG BĂNG: Working tree chưa sạch sẽ trước khi chạy P&L!\n"
-            f"Các tệp thay đổi chưa commit:\n{uncommitted}\n"
+            f"Các tệp thay đổi chưa commit:\n{uncommitted_str}\n"
             f"Bắt buộc phải commit và gắn tag trước khi thực thi."
         )
 
