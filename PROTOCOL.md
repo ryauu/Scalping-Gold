@@ -66,7 +66,7 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 | 2026-10-14 | 5 (C4) | — | C4 — Đo lường (bước 5) | (a) “8 năm lịch” = 2018-2025; năm 2025 tính là một năm dù chỉ đến 30/6; điều kiện: kỳ vọng dương ở ít nhất 5 trong 8 năm. (b) Kỳ vọng = trung bình pnl_r; profit factor = tổng pnl_r dương / \|tổng pnl_r âm\|; lệnh pnl_r = 0 không tính vào bên nào. (c) Kiểm soát ngẫu nhiên: với mỗi lệnh thật, mô phỏng cả BUY và SELL cùng entry_time, cùng entry_open, cùng khoảng cách SL theo giá d = \|entry_open − SL gốc\| (SL BUY = entry_open − d, SL SELL = entry_open + d), TP = 2R theo C3, cùng chi phí. Mỗi lần mô phỏng rút ngẫu nhiên BUY hoặc SELL cho từng lệnh với xác suất 0,5; 1.000 lần; seed cố định (seed = 42); thống kê = kỳ vọng; p = (1 + số lần kỳ vọng ngẫu nhiên ≥ kỳ vọng thật) / 1001. | Đã chốt trước P&L |
 | 2026-10-16 | 6 (Quy tắc Baseline Data v2) | — | Quy tắc cập nhật Baseline PRIMARY trên dữ liệu Data v2 (Europe/Nicosia, build_data.py v2.0, tag data-v2) | (1) Nguồn dữ liệu mới Data v2 (Europe/Nicosia, build_data.py v2.0, commit dữ liệu gắn tag git data-v2) thay thế hoàn toàn dữ liệu cũ v1.0. (2) Kết quả trên Data v2 THAY THẾ HOÀN TOÀN kết quả cũ (Data v1); tuyệt đối không chọn lựa (no cherry-picking) giữa hai kết quả. (3) Tham số Baseline (Mục 4) và 5 tiêu chí PASS (Mục 5) giữ nguyên vẹn 100%. (4) Số thử nghiệm thật $N_{\text{trials}}$ KHÔNG TĂNG ($N_{\text{trials}} = 1$) do đây là khắc phục lỗi dữ liệu (data defect fix), không phải thử nghiệm chiến lược mới. (5) Chỉ chạy trên lớp Development (2018-01-01 → 2025-06-30). Bảo toàn tuyệt đối Robustness và Holdout. (6) Báo cáo song song cả hai cột để ghi nhận khách quan tác động của việc sửa lỗi múi giờ. | Đã chốt trước khi chạy lại P&L *(soạn thảo ngày 16/10 trước lần chạy, commit ngày 21/10)* |
 | 2026-10-16 | 7 | 1 | Chạy lại Baseline PRIMARY trên lớp Development với dữ liệu Data v2 (Europe/Nicosia) | Mục 5 (đạt cả 5 điều kiện) | **FAIL** (1/5 điều kiện đạt). C1: 1.664 lệnh (PASS). C2: -0,0438R/lệnh (FAIL). C3: PF = 0,8987 (FAIL). C4: 4/8 năm dương (FAIL). C5: p = 0,2428 (FAIL, Monte Carlo 1.000 lần, seed = 42; sim mean = -0,0592R, std = 0,0216; exploratory: always BUY = -0,0626R, always SELL = -0,0568R). Chi tiết 8 năm: 2018 (-0,0191R), 2019 (-0,1276R), 2020 (+0,0180R), 2021 (-0,0975R), 2022 (+0,0308R), 2023 (-0,1471R), 2024 (+0,0216R), 2025 (+0,0060R). Tổng PnL: -72,92R; Win rate: 41,65%. Thay thế chính thức kết quả STT 1. |
-| 2026-10-21 | 8 | 2 | Đăng ký thử nghiệm SMC Sweep Confirmation v1 (Lọc Sweep Thanh khoản + Xác nhận Cấu trúc & FVG) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện, với C5 điều chỉnh đa so sánh $p \le 0{,}025$ do $N_{\text{trials}} = 2$). Chi tiết đặc tả logic đóng băng xem tiểu mục 4 bên dưới. | (chưa chạy — đã đóng băng trước khi code và tính toán) |
+| 2026-10-21 | 8 | 2 | Đăng ký thử nghiệm SMC Sweep Confirmation v1 (Lọc Sweep Thanh khoản + Xác nhận Cấu trúc & FVG) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện, với C5 điều chỉnh đa so sánh $p \le 0{,}025$ do $N_{\text{trials}} = 2$). Chi tiết đặc tả logic đóng băng xem tiểu mục 4 và 4.1 bên dưới. | (chưa chạy — đã đóng băng trước khi code và tính toán; v1.0 tag `prereg-smc-v1`, v1.1 tag `prereg-smc-v1.1`) |
 
 > **Ghi nhận trung thực lịch sử Git về STT 6 & STT 7:**  
 > Quy tắc STT 6 được viết trước lần chạy ngày 16/10/2026, nhưng được commit vào git ngày 21/10/2026 (commit `789654c` cho STT 6 rồi `3340cde` cho STT 7 cùng ngày 21/10 do tách/tái cấu trúc lịch sử sau khi kết quả đã có; kiểm tra bằng `git log --format='%h %ad %s' --date=iso`). Do đó, thứ tự commit trong lịch sử git không còn độc lập chứng minh STT 6 có trước lần chạy. Kết luận baseline không đổi (vẫn FAIL trên cả v1 và v2, $N_{\text{trials}} = 1$ không tăng, không gây hại). Đối với mọi đăng ký chiến lược SMC tiếp theo, bắt buộc phải commit và gắn tag git trước khi chạy bất kỳ tính toán P&L nào.
@@ -108,7 +108,7 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 
 ### 4. Đăng ký trước thử nghiệm SMC Sweep Confirmation v1 (STT 8 — N_trials = 2)
 
-**Trạng thái:** ĐÃ ĐÓNG BĂNG VÀ COMMIT TRƯỚC KHI CODE TÍN HIỆU VÀ TRƯỚC KHI TÍNH TOÁN P&L (Git tag: `prereg-smc-v1`).
+**Trạng thái:** ĐÃ ĐÓNG BĂNG VÀ COMMIT TRƯỚC KHI CODE TÍN HIỆU VÀ TRƯỚC KHI TÍNH TOÁN P&L (Git tag v1.0: `prereg-smc-v1`; Bản v1.1 sửa đổi C9 và bổ sung C5–C11: `prereg-smc-v1.1`).
 
 #### A. Giả thuyết & Mục tiêu
 Khắc phục điểm yếu chí mạng của Baseline Breakout (bị bẫy phá vỡ giả / fakeout tại các vùng thanh khoản quan trọng) bằng cách tiếp cận theo góc nhìn Smart Money Concepts (SMC): chỉ giao dịch theo hướng đảo chiều sau khi một vùng thanh khoản quan trọng đã bị quét (`SWEPT`) và được xác nhận bởi cấu trúc thị trường đảo chiều (`CHOCH`/`BOS`) cùng khối mất cân bằng (`FVG`) hợp lưu.
@@ -171,9 +171,195 @@ Chiến lược chỉ kích hoạt tín hiệu khi chuỗi sự kiện tuần t�
 
 #### G. Quy trình thực hiện nghiêm ngặt
 1. Đăng ký trước bằng commit và gắn tag `prereg-smc-v1` TRƯỚC KHI code mô-đun tín hiệu.
-2. Xây dựng mô-đun tín hiệu `src/backtest/smc/signals.py` và kiểm thử unit test (kèm test khẳng định FVG `spans_gap == True` không bao giờ sinh tín hiệu).
-3. Đếm tần suất tín hiệu theo từng năm (2018–2025) để kiểm tra điều kiện $\ge 800$ lệnh TRƯỚC KHI tính toán P&L. Nếu $< 800$ lệnh: ghi nhận kết quả thiếu mẫu mà không tự ý nới lỏng tham số.
-4. Chạy mô phỏng P&L và ghi nhận kết quả chính thức vào STT 8 Mục 9.
+2. Bổ sung làm rõ kỹ thuật và sửa đổi C9 tại phiên bản `prereg-smc-v1.1` trước khi chạy mô-đun tín hiệu.
+3. Xây dựng mô-đun tín hiệu `src/backtest/smc/signals.py` và kiểm thử unit test (kèm test khẳng định FVG `spans_gap == True` không bao giờ sinh tín hiệu).
+4. Đếm tần suất tín hiệu theo từng năm (2018–2025) để kiểm tra điều kiện $\ge 800$ lệnh TRƯỚC KHI tính toán P&L. Nếu $< 800$ lệnh: ghi nhận kết quả thiếu mẫu mà không tự ý nới lỏng tham số.
+5. Chạy mô phỏng P&L và ghi nhận kết quả chính thức vào STT 8 Mục 9.
+
+---
+
+### 4.1. Quy ước Kỹ thuật & Sửa đổi Nội dung C9 (v1.1 — Git tag: `prereg-smc-v1.1`)
+
+> **Khai báo Liêm chính Nghiên cứu (Pre-registration Integrity Declaration):**  
+> Toàn bộ các quy ước kỹ thuật (C5–C8, C10–C11) và sửa đổi nội dung (C9) dưới đây được soạn thảo, hoàn thiện và đóng băng TRƯỚC KHI thực hiện bất kỳ lệnh đếm tần suất tín hiệu (signal count) hay tính toán P&L nào của chiến lược STT 8 trên tập dữ liệu Development. Tuyệt đối chưa có bất kỳ số liệu kết quả nào của STT 8 được xem trước khi hoàn tất đăng ký v1.1.  
+> - **Sửa đổi nội dung (Amendment — C9):** Bắt buộc nến xung lực (displacement) tạo FVG phải xuất hiện từ nến sweep $s$ trở đi ($i-1 \ge s \iff i \ge s+1$), thu hẹp không gian tín hiệu so với công thức toán ban đầu của v1.0 (`time_candle >= time_s` cho phép $i = s$).  
+> - **Làm rõ kỹ thuật (Clarifications — C5–C8, C10–C11):** Chuẩn hóa quy tắc khớp lệnh C3, quy tắc 24 hàng dữ liệu H1, thứ tự ưu tiên bộ đếm hủy thác nước (waterfall drop priority), phân tách thị trường đóng cửa vs nến M1 thưa, và công thức thoát lệnh chi tiết.
+
+#### C5. Cơ chế Thực thi Lệnh, Quản lý Vị thế & Thoát Lệnh (Execution & Exit Rules)
+
+- **C5.1. Điểm vào lệnh & Thời gian nắm giữ tối đa theo hàng dữ liệu H1:**
+  - *Điểm vào lệnh (Entry):* Khớp lệnh tại giá mở cửa `Open` của nến M1 đầu tiên ngay sau khi nến tín hiệu $c$ đóng cửa ($time\_utc_{\text{m1}} == close\_time_c$).
+  - *Quy tắc đếm theo hàng dữ liệu H1 (Data Row Rule):* Thời gian nắm giữ tối đa được đếm theo **24 hàng dữ liệu H1 liên tiếp thực tế** trong bảng `derived/GOLD_H1_utc`, không phụ thuộc vào số giờ đồng hồ liên tục. Hàng H1 mở tại $close\_time_c$ được tính là hàng nắm giữ thứ nhất ($c+1$). Vị thế được giữ tối đa trong 24 hàng H1: $[c+1, c+24]$.
+  - *Thoát lệnh theo thời gian (TIME_EXIT):* Khi hàng H1 thứ 24 ($c+24$) đóng cửa, nếu vị thế chưa chạm SL hoặc TP, lệnh sẽ đóng cưỡng bức tại giá `Open` của nến M1 đầu tiên ngay sau khi hàng H1 thứ 24 đóng với lý do `TIME_EXIT`. Nếu sau hàng $c+24$ thị trường đóng cửa (nghỉ hàng ngày, cuối tuần), lệnh thoát tại giá `Open` của nến M1 đầu tiên khả dụng khi mở cửa trở lại:
+    - Lệnh BUY: $\text{Exit Price} = \text{Open}_{\text{m1}} - \text{slip}$
+    - Lệnh SELL: $\text{Exit Price} = \text{Open}_{\text{m1}} + \text{spread} + \text{slip}$
+  - *Tính phụ thuộc tham số $M$:* Cấu hình PRIMARY cố định $M = 24$ hàng H1. Nhánh EXPLORATORY (nếu thử nghiệm sau này với $M = 48$) sẽ đổi tương ứng thời gian nắm giữ thành 48 hàng H1.
+
+- **C5.2. Khớp lệnh nội phiên M1, Quy tắc Gap & Thứ tự ưu tiên (Nguyên văn theo C3):**
+  - *Thời điểm bắt đầu quét:* Việc kiểm tra chạm SL/TP bắt đầu ngay từ chính nến M1 vào lệnh ($time\_utc_{\text{m1\_entry}}$), tính cả toàn bộ diễn biến nến đó.
+  - *Tham số chi phí cố định theo năm (Quy ước C3 & `config/spreads.json`):*
+    - $\text{spread} = \text{spread}_{\text{year}} \times 1{,}25 \times 0{,}01 \text{ USD}$ (lấy trung vị `spread_year` theo năm từ `config/spreads.json`, cột spread từng nến không dùng).
+    - $\text{slip} = 5 \text{ points} = 0{,}05 \text{ USD}$ mỗi lần khớp (vào và ra).
+  - *Chạm Stop Loss thông thường (`SL`):*
+    - BUY: $\text{Low}_{\text{m1}} \le SL \implies \text{Exit Price} = SL - \text{slip}$.
+    - SELL: $\text{High}_{\text{m1}} + \text{spread} \ge SL \implies \text{Exit Price} = SL + \text{slip}$.
+  - *Quy tắc Nhảy Gap qua SL cho MỌI nến M1 (`SL_GAP` — Nhất quán với C3):*
+    - BUY: Nếu $\text{Open}_{\text{m1}} \le SL \implies \text{Exit Price} = \text{Open}_{\text{m1}} - \text{slip}$.
+    - SELL: Nếu $\text{Open}_{\text{m1}} + \text{spread} \ge SL \implies \text{Exit Price} = \text{Open}_{\text{m1}} + \text{spread} + \text{slip}$.
+  - *Chạm Take Profit (`TP` — Nhất quán với C3):*
+    - BUY: $\text{High}_{\text{m1}} \ge TP \implies \text{Exit Price} = TP - \text{slip}$.
+    - SELL: $\text{Low}_{\text{m1}} + \text{spread} \le TP \implies \text{Exit Price} = TP + \text{slip}$.
+    - *Gap qua TP:* Theo C3, khi giá mở cửa nhảy gap vượt qua mức TP ($\text{Open}_{\text{m1}} > TP$ với BUY hoặc $\text{Open}_{\text{m1}} + \text{spread} < TP$ với SELL), lệnh **CHỈ LẤY ĐÚNG MỨC TP** (BUY: $TP - \text{slip}$; SELL: $TP + \text{slip}$), tuyệt đối không lấy giá ngoài TP.
+  - *Thứ tự ưu tiên trong cùng một nến M1:*
+    $$\mathbf{SL / SL\_GAP > TP > TIME\_EXIT}$$
+    Nếu trong cùng một nến M1 đồng thời chạm cả SL và TP, áp dụng nguyên tắc thận trọng tối đa của C3: **ƯU TIÊN XỬ LÝ CHẠM SL TRƯỚC** (ghi nhận lệnh thua `SL`).
+
+- **C5.3. Đóng lệnh ranh giới tập dữ liệu (DATA_END Guard):**
+  - Mốc kết thúc tập dữ liệu được đọc động từ trường `end` của phân lớp tương ứng trong `config/splits.json`:
+    $$\text{split\_end} = \text{splits}[split][1] + \text{ " 23:59:00 UTC"}$$
+    (đối với Development: `splits["development"][1]` là `"2025-06-30"`, tương ứng mốc kết thúc là `2025-06-30 23:59:00 UTC`). Nến M1 cuối cùng là nến có $time\_utc = \text{2025-06-30 23:59:00 UTC}$.
+  - Mọi vị thế còn đang mở tại thời điểm kết thúc này sẽ bị buộc đóng tại giá đóng cửa của nến M1 cuối cùng với lý do `DATA_END`:
+    - BUY: $\text{Exit Price} = \text{Close}_{\text{m1\_end}} - \text{slip}$
+    - SELL: $\text{Exit Price} = \text{Close}_{\text{m1\_end}} + \text{spread} + \text{slip}$
+  - *Guard tuyệt đối:* Thuật toán có chốt chặn cấm đọc bất kỳ nến M1 nào sau mốc `split_end`.
+
+- **C5.4. Giả định Swap = 0, Hạn chế đã biết & Phân tích Độ nhạy Hậu kiểm:**
+  - *Hạn chế đã biết (Known Limitation):* Giả định $swap = 0$ trong STT 8 là một **thiên lệch lạc quan (optimistic bias)** vì lệnh giữ tối đa 24 hàng H1 chắc chắn có tỷ lệ vắt qua rollover hàng ngày.
+  - *Ước lượng thô từ MT5 symbol_info:* API MT5 chỉ cung cấp giá trị swap tại thời điểm hiện tại (`swap_long`, `swap_short`), do đó việc áp mức swap này lên giai đoạn 2018–2025 chỉ mang tính chất **ước lượng thô (coarse approximation)**.
+  - *Đọc ngày tính swap $\times 3$:* Đọc động từ thuộc tính `swap_rollover3days` của symbol (không mặc định cứng là thứ Tư).
+  - *Đăng ký kiểm soát:* Thuật toán tự động ghi nhận số lượng lệnh qua rollover `n_rollover_trades` và tổng số đêm rollover chịu phí. Thực hiện phân tích độ nhạy hậu kiểm (exploratory stress test) bằng swap thực tế của broker sau khi chốt P&L chính thức (không dùng để quyết định PASS/FAIL).
+
+---
+
+#### C6. Quy tắc Chọn Lọc Sweep, Duy trì Sweep Chưa Thỏa Chuỗi & Tiêu Thụ Sweep Vô Điều Kiện
+
+- **C6.1. Tập hợp Sweep hợp lệ & Neo Sweep gần nhất:**
+  - Tại nến tín hiệu $c$, xác định tập hợp các sweep cùng chiều $s_i$ thỏa mãn toàn bộ chuỗi xác nhận:
+    $$S_{\text{valid}}(c) = \{ s_i \mid s_i < c \le s_i + 24 \text{ hàng H1 và toàn bộ chuỗi thỏa mãn tại } c \}$$
+  - Khi có nhiều sweep hợp lệ, sweep được chọn làm mốc neo để tính $SL$ và kiểm tra cửa sổ là **sweep gần nhất**:
+    $$s = \max(S_{\text{valid}}(c))$$
+- **C6.2. Duy trì Sweep Chưa Thỏa Chuỗi (Sweep Remains Open):**
+  - Cửa sổ hiệu lực của sweep $s$ kéo dài trong đúng **24 hàng dữ liệu H1** ($s < t_{\text{struct}} \le s + 24$).
+  - Nếu trong cửa sổ xuất hiện một sự kiện cấu trúc tại $t_1 > s$ nhưng tại $t_1$ KHÔNG có khối FVG hợp lưu đang active, thì chuỗi xác nhận chưa thỏa mãn $\implies$ chưa sinh tín hiệu.
+  - Khi đó, **sweep $s$ VẪN ĐƯỢC GIỮ MỞ** đến hết cửa sổ 24 hàng H1 để tiếp tục chờ các sự kiện cấu trúc tiếp theo ($t_2 \le s + 24$) có FVG hợp lưu.
+  - Nếu hết 24 hàng dữ liệu H1 mà không có nến nào thỏa mãn trọn vẹn cả chuỗi cấu trúc + FVG, sweep $s$ hết hiệu lực (`EXPIRED_WINDOW`) và đóng lại mà không sinh tín hiệu.
+- **C6.3. Quy tắc Tiêu thụ Sweep Vô điều kiện (Unconditional Sweep Consumption Rule):**
+  - Ngay khi chuỗi xác nhận hoàn tất tại nến $c$ và một tín hiệu được sinh ra, sweep $s$ (cùng toàn bộ các sweep hợp lệ cũ hơn $s_i \le s$) được coi là **ĐÃ BỊ TIÊU THỤ (CONSUMED) VÀ ĐÓNG LẠI HOÀN TOÀN**, bất kể tín hiệu đó:
+    1. Được khớp vào lệnh thành công (`ENTERED`), hay
+    2. Bị hủy bỏ bởi bất kỳ lý do/bộ lọc nào trong thác nước hủy tín hiệu (C11.3).
+  - Sweep đã tiêu thụ tuyệt đối không được phép mở lại để kích hoạt thêm tín hiệu ở các nến tiếp theo $c+1, c+2, \dots$ Triệt tiêu hoàn toàn hiện tượng ngầm hoãn tín hiệu.
+
+---
+
+#### C7. Nến Tín Hiệu $c = t_{\text{struct}}$ & Khối FVG Hợp Lưu
+
+- **C7.1. Định danh Nến Tín hiệu $c$:**
+  - Nến tín hiệu $c$ chính là thời điểm đóng cửa của nến sự kiện cấu trúc thị trường:
+    $$c = t_{\text{struct}}$$
+  - Đây là nghĩa gốc chính xác theo văn bản đã đăng ký (`PROTOCOL.md` STT 8 Mục B, dòng 122 & dòng 131).
+  - *Loại trừ Khởi tạo cấu trúc:* Chỉ các sự kiện phá vỡ thực sự `CHOCH` hoặc `BOS` mới được chấp nhận; các sự kiện khởi tạo xu hướng ban đầu `BULLISH_INIT_BREAK` và `BEARISH_INIT_BREAK` tuyệt đối KHÔNG được dùng làm tín hiệu.
+- **C7.2. Điều kiện Khối FVG Hợp lưu tại Nến $c$:**
+  - Tại thời điểm đóng nến $c$, BẮT BUỘC tồn tại ít nhất một khối FVG cùng chiều từ `fvg.py` thỏa mãn đồng thời cả 3 tiêu chí:
+    1. `spans_gap == False`: FVG hình thành từ các nến liên tục, không vắt qua khoảng trống giờ nghỉ hoặc cuối tuần.
+    2. Đang ở trạng thái `ACTIVE` tại nến $c$: FVG đã được tạo trước hoặc tại $c$ ($time\_available \le close\_time_c$), tính đến khi nến $c$ đóng cửa chưa bị `INVALIDATED` và chưa bị `EXPIRED`. **Kể cả khi FVG đã ghi nhận sự kiện `TESTED` (đã có râu nến trước đó chạm mép gần)**, theo đúng vòng đời máy trạng thái trong `SMC_SPEC.md` Mục 4.3 (dòng 207–208), FVG sau khi `TESTED` vẫn tiếp tục ở trạng thái `ACTIVE` và hoàn toàn hợp lệ để làm khối FVG hợp lưu.
+    3. Có nến xung lực (nến giữa) hình thành từ nến sweep $s$ trở đi (xem định nghĩa chi tiết tại C9).
+
+---
+
+#### C8. Giải Quyết Xung Đột Tín Hiệu & Quy Tắc Một Vị Thế Duy Nhất
+
+- **C8.1. Xung đột hai hướng tại nến Sweep $s$ (`DROP_CONFLICT_SWEEP`):**
+  - Nếu trong cùng một nến H1 $s$ có cả High pool bị `SWEPT` và Low pool bị `SWEPT` (nến ngoài quét 2 đầu): **HỦY BỎ HOÀN TOÀN CẢ HAI HƯỚNG VÀ GHI NHẬN ĐẾM `DROP_CONFLICT_SWEEP`**.
+- **C8.2. Xung đột hai hướng tại nến Tín hiệu $c$ (`DROP_CONFLICT_SIGNAL`):**
+  - Nếu tại nến $c$ xuất hiện sự kiện cấu trúc và FVG hợp lưu thỏa mãn đồng thời cả chuỗi BUY và chuỗi SELL: **HỦY BỎ HOÀN TOÀN CẢ HAI HƯỚNG TẠI $c$, TIÊU THỤ CẢ HAI SWEEP LIÊN QUAN VÀ GHI NHẬN ĐẾM `DROP_CONFLICT_SIGNAL`**.
+- **C8.3. Quy tắc Một vị thế duy nhất (`DROP_POSITION_BUSY`):**
+  - Tại bất kỳ thời điểm nào, hệ thống chỉ nắm giữ tối đa **01 vị thế mở duy nhất**.
+  - Nếu tại nến $c$ xuất hiện tín hiệu thỏa mãn chuỗi SMC nhưng hệ thống đang có một vị thế chưa đóng:
+    - Tín hiệu mới **BỊ HỦY BỎ HOÀN TOÀN (DROP_POSITION_BUSY)**.
+    - Tuyệt đối KHÔNG hoãn vào lệnh sau khi vị thế cũ đóng.
+    - Sweep $s$ liên quan bị tiêu thụ ngay lập tức theo quy tắc C6.3.
+
+---
+
+#### C9. Sửa Đổi Nội Dung: Bộ Ba Nến FVG & Ràng Buộc Xung Lực Sau Sweep (Amendment)
+
+- **C9.1. Ký hiệu Bộ ba Nến chuẩn theo SMC_SPEC Mục 4.1:**
+  - Bộ 3 nến H1 liên tiếp được ký hiệu là $[i-2, \, i-1, \, i]$:
+    - Nến $i-2$: Nến thứ nhất.
+    - Nến $i-1$: Nến thứ hai (nến giữa / nến xung lực dịch chuyển mạnh).
+    - Nến $i$: Nến thứ ba (nến hoàn tất FVG, lưu trong `fvg_df` với `bar_index` và `time_candle = time_utc[i]`).
+- **C9.2. Sửa đổi logic đăng ký trước (Pre-registration Amendment) & Cho phép $s$ là nến xung lực:**
+  - **Nội dung sửa đổi:** Bắt buộc nến xung lực (nến giữa $i-1$) phải xuất hiện từ nến sweep $s$ trở đi:
+    $$\text{Nến xung lực (nến giữa) } (i-1) \ge s \iff \text{Nến xác nhận FVG } i \ge s+1$$
+    - Theo chỉ số nến: $bar\_index_{\text{fvg}} \ge bar\_index_s + 1$.
+    - Theo thời gian: $time\_candle_{\text{fvg}} \ge time\_utc[s+1]$ (tương đương $time\_available_{\text{fvg}} \ge time\_available_s + 1\text{h}$).
+  - **Lý do sửa đổi:** Bảo đảm tính nhân quả logic theo đúng phương pháp SMC: khối FVG mất cân bằng phải là kết quả của xung lực bứt phá (displacement) xảy ra **SAU** khi thanh khoản bị quét, thể hiện phản ứng đảo chiều thực sự của thị trường sau sweep.
+  - **Thừa nhận thu hẹp quy tắc:** Văn bản đăng ký ban đầu tại dòng 131 ghi `time_candle >= time_s` với `time_candle` là nến thứ ba ($i$), điều này vô tình cho phép $i = s \implies i-1 = s-1$ (tức xung lực xảy ra trước khi quét thanh khoản). Việc siết thành $i \ge s+1$ là một **sửa đổi nội dung (amendment)** chính thức thu hẹp không gian tín hiệu nhằm loại trừ các FVG hình thành trước sweep.
+  - **Trường hợp nến sweep $s$ là nến xung lực:** Quy tắc cho phép $i-1 = s$. Khi đó, nến thứ ba $i = s+1$ đóng cửa sẽ hoàn tất FVG hợp lệ.
+
+---
+
+#### C10. Định Nghĩa $R_{dist}$, Chi Phí Ma Sát Năm, Sàn Chi Phí & Trần An Toàn
+
+- **C10.1. Giá vào thực tế & Đo lường $R_{dist}$ (Quy ước C3):**
+  - Giá vào lệnh thực khớp ($\text{Entry}_{\text{exec}}$) bao gồm đầy đủ chi phí ma sát cố định theo năm:
+    - Lệnh BUY: $\text{Entry}_{\text{exec}} = \text{Open}_{\text{m1}} + \text{spread} + \text{slip}$
+    - Lệnh SELL: $\text{Entry}_{\text{exec}} = \text{Open}_{\text{m1}} - \text{slip}$
+  - Trong đó $\text{spread} = \text{spread}_{\text{year}} \times 1{,}25 \times 0{,}01 \text{ USD}$ và $\text{slip} = 0{,}05 \text{ USD}$ (đọc từ `config/spreads.json`).
+  - Khoảng cách rủi ro $R_{dist}$ được đo **từ giá khớp thực tế đến mức Stop Loss**:
+    $$R_{dist} = |\text{Entry}_{\text{exec}} - SL|$$
+    - BUY: $R_{dist} = \text{Entry}_{\text{exec}} - \min_{i \in [s, c]} Low[i]$.
+    - SELL: $R_{dist} = \max_{i \in [s, c]} High[i] - \text{Entry}_{\text{exec}}$.
+- **C10.2. Chi phí ma sát năm (SMC_SPEC Mục 7.1 & `config/spreads.json`):**
+  $$\text{friction}_{\text{year}} = \text{spread}_{\text{year}} \times 1{,}25 \times 0{,}01 + 2 \times \text{slip} = (\text{spread}_{\text{year}} \times 1{,}25 + 10) \times 0{,}01 \text{ USD}$$
+  - *Ghi nhận về năm 2025:* Giá trị `spread_year` năm 2025 là 34.0 points (đóng băng từ bảng `DATA.md` §5 trên toàn bộ dữ liệu v2 tải về). Giá trị này được giữ nguyên theo đúng Baseline C3 để bảo đảm tính nhất quán, đồng thời duy trì thiên lệch thận trọng (chi phí cao hơn thực tế 30.0 points của 6 tháng đầu năm Development).
+- **C10.3. Ràng buộc Sàn chi phí & Trần an toàn:**
+  - *Sàn chi phí (Cost Floor — Nguồn: SMC_SPEC.md Mục 7.2):*
+    $$R_{dist} \ge \max\left(0{,}5 \times ATR(H1, 14)_{[c]}, \, 12{,}5 \times \text{friction}_{\text{year}}\right)$$
+    Trong đó $ATR(H1, 14)_{[c]}$ là ATR(14) của nến H1 tín hiệu $c$ đã đóng hoàn chỉnh.
+  - *Trần an toàn khoảng cách dừng lỗ (Safety Ceiling — Nguồn: PROTOCOL.md STT 8 Mục D):*
+    $$R_{dist} \le 0{,}10 \times \text{Entry}_{\text{exec}}$$
+  - *Xử lý vi phạm:* Mọi tín hiệu vi phạm sàn hoặc trần $R_{dist}$ sẽ **BỊ HỦY BỎ HOÀN TOÀN (DROP_INVALID_RDIST)**, ghi nhận bộ đếm, và sweep $s$ liên quan bị tiêu thụ ngay lập tức.
+- **C10.4. Take Profit (TP — Nhất quán với C3):**
+  - Tỷ lệ cố định $RR = 1:2$:
+    $$TP = \begin{cases} \text{Entry}_{\text{exec}} + 2 \times R_{dist} & (\text{BUY}) \\ \text{Entry}_{\text{exec}} - 2 \times R_{dist} & (\text{SELL}) \end{cases}$$
+
+---
+
+#### C11. Khớp Lệnh M1, Phân Tách Thị Trường Nghỉ vs Nến M1 Thưa & Thứ Tự Ưu Tiên Bộ Đếm Hủy Thác Nước
+
+- **C11.1. Phân tách Ranh giới Split, Thị trường Đóng cửa vs Nến M1 Thưa:**
+  - *Trường hợp 1 — Ranh giới tập dữ liệu (`DROP_SPLIT_END`):*
+    - Nếu nến tín hiệu $c$ đóng cửa tại hoặc sau mốc kết thúc tập dữ liệu ($close\_time_c \ge \text{split\_end}$):
+    - $\implies$ **HỦY BỎ TÍN HIỆU HOÀN TOÀN (DROP_SPLIT_END)**, tiêu thụ sweep $s$ ngay lập tức, không vào lệnh ngoài ranh giới split.
+  - *Trường hợp 2 — Thị trường đóng cửa (`DROP_MARKET_CLOSED`):*
+    - Nếu trong bảng dữ liệu H1 **hoàn toàn không có hàng H1 nào mở tại $close\_time_c$** (do rơi vào giờ nghỉ bảo trì hàng ngày 17:00 NY, cuối tuần hoặc ngày lễ đóng sàn):
+    - $\implies$ **HỦY BỎ TÍN HIỆU HOÀN TOÀN (DROP_MARKET_CLOSED)**, tiêu thụ sweep $s$ ngay lập tức, không hoãn lệnh sang phiên sau.
+  - *Trường hợp 3 — Thị trường mở cửa nhưng thiếu nến M1 phút :00 (Tuân thủ DATA.md §5):*
+    - Nếu tồn tại hàng H1 mở tại $close\_time_c$ (thị trường đang giao dịch) nhưng trong kho M1 thiếu nến tại đúng phút :00 do không có tick:
+    - $\implies$ Chọn **giá `Open` của nến M1 đầu tiên tồn tại trong giờ đó** (chính là giá `Open` của hàng dữ liệu H1 mở tại $close\_time_c$). Lệnh được khớp bình thường theo C3 và ghi nhận riêng vào bộ đếm cảnh báo **`n_sparse_m1_entry`** để kiểm toán minh bạch, tuyệt đối không hủy bỏ tín hiệu.
+- **C11.2. Giờ nghỉ danh định NY (`DROP_DAILY_BREAK` — Chốt chặn phòng thủ):**
+  - Từ ngày 2015-07-02 trở đi, giờ nghỉ 17:00–18:00 NY hoàn toàn không có nến trong dữ liệu (đã được xử lý triệt để bởi `DROP_MARKET_CLOSED`). Do đó trên tập Development (2018–2025), bộ đếm `DROP_DAILY_BREAK` sẽ bằng 0.
+  - Quy tắc này được giữ lại như một **chốt chặn phòng thủ (defensive guard)** nhằm bảo vệ tính an toàn khi mở khóa lớp Robustness 2014–2015 (giai đoạn broker có 111 nến thưa 14 phút đầu giờ nghỉ). Nếu một nến tín hiệu $c$ rơi vào khung giờ bảo trì danh định 17:00–18:00 NY (21:00–22:00 UTC hè / 22:00–23:00 UTC đông), tín hiệu sẽ bị hủy với mã **`DROP_DAILY_BREAK`**.
+- **C11.3. Thứ tự Ưu tiên Bộ đếm Hủy Thác Nước (Waterfall Drop Priority):**
+  - Để đảm bảo tính tái lập 100% của số lượng đếm tín hiệu và loại bỏ hoàn toàn sự phụ thuộc vào thứ tự cài đặt mã, mọi tín hiệu tiềm năng tại nến $c$ được kiểm tra qua một quy trình thác nước nghiêm ngặt theo đúng thứ tự sau:
+    $$\mathbf{1.\; DROP\_CONFLICT\_SIGNAL} \longrightarrow \mathbf{2.\; DROP\_SPLIT\_END} \longrightarrow \mathbf{3.\; DROP\_MARKET\_CLOSED} \longrightarrow \mathbf{4.\; DROP\_DAILY\_BREAK} \longrightarrow \mathbf{5.\; DROP\_POSITION\_BUSY} \longrightarrow \mathbf{6.\; DROP\_INVALID\_RDIST}$$
+  - **Quy tắc đếm đơn nhất (Strict Single Counter Rule):** Tín hiệu vi phạm điều kiện nào đầu tiên trong thác nước sẽ **CHỈ TĂNG ĐÚNG MỘT BỘ ĐẾM DUY NHẤT ĐÓ**, ngay lập tức dừng quy trình đánh giá, và tiêu thụ sweep $s$ liên quan theo quy tắc C6.3.
+  - **Kích hoạt vào lệnh (`ENTERED`):** Chỉ khi vượt qua toàn bộ 6 bước kiểm tra trên, tín hiệu mới được xác nhận hợp lệ và kích hoạt vào lệnh thành công.
+- **C11.4. Bảng Danh mục Bộ đếm Hủy Tín hiệu & Cảnh báo Minh bạch:**
+
+| Thứ tự Thác nước / Mã | Phân loại | Nguyên nhân kích hoạt | Hành vi đối với Sweep $s$ |
+| :--- | :--- | :--- | :--- |
+| **1. `DROP_CONFLICT_SIGNAL`** | Hủy bỏ | Nến $c$ đồng thời thỏa mãn chuỗi xác nhận cả BUY và SELL | Hủy cả 2 chiều tại $c$, tiêu thụ cả 2 sweep |
+| **2. `DROP_SPLIT_END`** | Hủy bỏ | $close\_time_c \ge \text{split\_end}$ (vượt mốc kết thúc phân lớp) | Tiêu thụ sweep $s$ ngay lập tức, không hoãn |
+| **3. `DROP_MARKET_CLOSED`** | Hủy bỏ | Không có hàng H1 nào mở tại $close\_time_c$ (giờ nghỉ, cuối tuần, lễ) | Tiêu thụ sweep $s$ ngay lập tức, không hoãn |
+| **4. `DROP_DAILY_BREAK`** | Hủy bỏ | $close\_time_c$ rơi vào khung bảo trì danh định 17:00–18:00 NY (phòng thủ Robustness) | Tiêu thụ sweep $s$ ngay lập tức, không hoãn |
+| **5. `DROP_POSITION_BUSY`** | Hủy bỏ | Đang có 01 vị thế mở khác chưa đóng tại thời điểm $c$ | Tiêu thụ sweep $s$ ngay lập tức, không hoãn |
+| **6. `DROP_INVALID_RDIST`** | Hủy bỏ | $R_{dist}$ vi phạm sàn ($< 0{,}5 ATR$ hoặc $< 12{,}5 friction$) hoặc vi phạm trần ($> 0{,}10 \times \text{Entry}$) | Tiêu thụ sweep $s$ ngay lập tức, không hoãn |
+| **`DROP_CONFLICT_SWEEP`** | Hủy bỏ | Nến $s$ vừa bị quét High vừa bị quét Low (quét 2 đầu tại $s$) | Hủy cả 2 chiều tại $s$, không sinh tín hiệu |
+| **`n_sparse_m1_entry`** | Cảnh báo | Có hàng H1 nhưng thiếu nến M1 phút :00 $\implies$ Lấy Open của M1 đầu tiên | Khớp lệnh bình thường, ghi nhận đếm |
+| **`n_rollover_trades`** | Thống kê | Lệnh mở vắt qua mốc rollover hàng ngày (17:00 NY) | Phục vụ phân tích độ nhạy swap hậu kiểm |
+
 
 
 

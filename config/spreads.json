@@ -1,0 +1,24 @@
+{
+  "_note": "Bảng trung vị spread (points) theo năm trích xuất từ dữ liệu Data v2 (2026-10-13), đóng băng theo quy ước C3 của PROTOCOL.md. Không sửa đổi sau khi chốt.",
+  "unit": "points",
+  "point_value_usd": 0.01,
+  "spread_multiplier": 1.25,
+  "slip_points": 5.0,
+  "slip_usd": 0.05,
+  "yearly_median_spreads_points": {
+    "2014": 45.0,
+    "2015": 39.0,
+    "2016": 43.0,
+    "2017": 41.0,
+    "2018": 32.0,
+    "2019": 32.0,
+    "2020": 33.0,
+    "2021": 35.0,
+    "2022": 26.0,
+    "2023": 30.0,
+    "2024": 31.0,
+    "2025": 34.0,
+    "2026": 51.0
+  },
+  "notes_2025": "Giá trị 34.0 points được tính trên toàn bộ dữ liệu tải về năm 2025 (gồm cả nửa sau năm 2025 thuộc Holdout). Mặc dù trung vị thực tế 6 tháng đầu năm Development là 30.0 points, giá trị 34.0 đã được đóng băng theo C3 và áp dụng cho Baseline STT 7. Giá trị này được giữ nguyên để bảo đảm tính nhất quán giữa các thử nghiệm và duy trì thiên lệch thận trọng (conservative bias)."
+}

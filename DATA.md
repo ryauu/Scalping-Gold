@@ -68,6 +68,7 @@ Do thư mục `data/` không commit lên git, bảng manifest dưới đây lưu
 > - **Clean M1:** mỗi dòng định dạng `f"{time_utc},{time_server},{open:.2f},{high:.2f},{low:.2f},{close:.2f},{tick_volume},{spread}\n"`.
 > - **Derived H1:** mỗi dòng định dạng `f"{time_utc},{open:.2f},{high:.2f},{low:.2f},{close:.2f},{tick_volume},{spread:.1f},{n_m1}\n"`.
 > - Cho phép kiểm chứng tính toàn vẹn 100% độc lập với phiên bản DuckDB/Parquet/OS khi dựng lại.
+> - **Lưu ý thực thi:** Toàn bộ các script kiểm chứng trong thư mục `tools/` (`tools/generate_manifest.py`, `tools/calc_content_hash.py`, v.v.) sử dụng đường dẫn tương đối trỏ vào `data/...`, do đó bắt buộc phải thực thi từ thư mục gốc của repository (ví dụ: `python tools/generate_manifest.py`).
 
 ### 7.1. Clean M1 (`data/clean/GOLD_M1_utc`) — Tổng cộng: 4.353.867 dòng
 | Năm | Số dòng M1 | Kích thước (bytes) | File SHA-256 (bản lưu) | Canonical Content SHA-256 (nội dung) |
