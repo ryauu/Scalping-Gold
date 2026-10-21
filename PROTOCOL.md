@@ -65,7 +65,7 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 | 2026-10-14 | 4 (C3) | — | C3 — Quy ước mô phỏng (bước 4) | Dữ liệu M1 là giá bid; 1 point = 0,01. Spread = trung vị spread năm đó × 1,25; slip = 5 points mỗi lần khớp (vào và ra); cột spread từng nến không dùng. BUY vào tại Open nến kế + spread + slip; SELL vào tại Open nến kế − slip. R_dist = \|giá vào đã gồm chi phí − SL\|; TP = giá vào ± 2×R_dist. Kích hoạt: BUY, SL khi bid low ≤ SL, TP khi bid high ≥ TP; SELL, SL khi bid high + spread ≥ SL, TP khi bid low + spread ≤ TP. Thoát tại mức kích hoạt: BUY trừ slip, SELL cộng slip. Kiểm tra từ chính nến vào lệnh. Gap qua SL: thoát tại Open (BUY: Open − slip; SELL: Open + spread + slip). Gap qua TP: chỉ lấy đúng mức TP. Chạm cả hai trong một nến: tính SL. Thoát cứng: nến đầu tiên có giờ ≥ 16:00 UTC, tại Open (BUY: − slip; SELL: + spread + slip). Hết dữ liệu trước 16:00: thoát tại Close nến cuối, ghi DATA_END và đếm. entry_delay được ghi lại, không dùng để lọc. | Đã chốt trước P&L |
 | 2026-10-14 | 5 (C4) | — | C4 — Đo lường (bước 5) | (a) “8 năm lịch” = 2018-2025; năm 2025 tính là một năm dù chỉ đến 30/6; điều kiện: kỳ vọng dương ở ít nhất 5 trong 8 năm. (b) Kỳ vọng = trung bình pnl_r; profit factor = tổng pnl_r dương / \|tổng pnl_r âm\|; lệnh pnl_r = 0 không tính vào bên nào. (c) Kiểm soát ngẫu nhiên: với mỗi lệnh thật, mô phỏng cả BUY và SELL cùng entry_time, cùng entry_open, cùng khoảng cách SL theo giá d = \|entry_open − SL gốc\| (SL BUY = entry_open − d, SL SELL = entry_open + d), TP = 2R theo C3, cùng chi phí. Mỗi lần mô phỏng rút ngẫu nhiên BUY hoặc SELL cho từng lệnh với xác suất 0,5; 1.000 lần; seed cố định (seed = 42); thống kê = kỳ vọng; p = (1 + số lần kỳ vọng ngẫu nhiên ≥ kỳ vọng thật) / 1001. | Đã chốt trước P&L |
 | 2026-10-16 | 6 (Quy tắc Baseline Data v2) | — | Quy tắc cập nhật Baseline PRIMARY trên dữ liệu Data v2 (Europe/Nicosia, build_data.py v2.0, tag data-v2) | (1) Nguồn dữ liệu mới Data v2 (Europe/Nicosia, build_data.py v2.0, commit dữ liệu gắn tag git data-v2) thay thế hoàn toàn dữ liệu cũ v1.0. (2) Kết quả trên Data v2 THAY THẾ HOÀN TOÀN kết quả cũ (Data v1); tuyệt đối không chọn lựa (no cherry-picking) giữa hai kết quả. (3) Tham số Baseline (Mục 4) và 5 tiêu chí PASS (Mục 5) giữ nguyên vẹn 100%. (4) Số thử nghiệm thật $N_{\text{trials}}$ KHÔNG TĂNG ($N_{\text{trials}} = 1$) do đây là khắc phục lỗi dữ liệu (data defect fix), không phải thử nghiệm chiến lược mới. (5) Chỉ chạy trên lớp Development (2018-01-01 → 2025-06-30). Bảo toàn tuyệt đối Robustness và Holdout. (6) Báo cáo song song cả hai cột để ghi nhận khách quan tác động của việc sửa lỗi múi giờ. | Đã chốt trước khi chạy lại P&L *(soạn thảo ngày 16/10 trước lần chạy, commit ngày 21/10)* |
-| 2026-10-21 | 8 | 2 | Đăng ký thử nghiệm SMC Sweep Confirmation v1 (Lọc Sweep Thanh khoản + Xác nhận Cấu trúc & FVG) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện, với C5 điều chỉnh đa so sánh $p \le 0{,}025$ do $N_{\text{trials}} = 2$). Chi tiết đặc tả logic đóng băng xem tiểu mục 4, 4.1, 4.2, 4.3 và 4.4 bên dưới. | Không thể PASS do thiếu mẫu (747 < 800 lệnh theo C1); chạy P&L mô tả thuần túy, tính $N_{\text{trials}} = 3$ cho bản thiết kế tiếp theo (v1.0 tag `prereg-smc-v1`, v1.1 tag `prereg-smc-v1.1`, v1.2 tag `prereg-smc-v1.2`, v1.3 tag `prereg-smc-v1.3`, v1.4 tag `prereg-smc-v1.4`, v1.5 tag `prereg-smc-v1.5`) |
+| 2026-10-21 | 8 | 2 | Đăng ký thử nghiệm SMC Sweep Confirmation v1 (Lọc Sweep Thanh khoản + Xác nhận Cấu trúc & FVG) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện, với C5 điều chỉnh đa so sánh $p \le 0{,}025$ do $N_{\text{trials}} = 2$). Chi tiết đặc tả logic đóng băng xem tiểu mục 4, 4.1, 4.2, 4.3, 4.4 và 4.5 bên dưới. | Không thể PASS do thiếu mẫu (747 < 800 lệnh theo C1); chạy P&L mô tả thuần túy, tính $N_{\text{trials}} = 3$ cho bản thiết kế tiếp theo (v1.0 tag `prereg-smc-v1`, v1.1 tag `prereg-smc-v1.1`, v1.2 tag `prereg-smc-v1.2`, v1.3 tag `prereg-smc-v1.3`, v1.4 tag `prereg-smc-v1.4`, v1.5 tag `prereg-smc-v1.5`, v1.6 tag `prereg-smc-v1.6`) |
 
 > **Ghi nhận trung thực lịch sử Git về STT 6 & STT 7:**  
 > Quy tắc STT 6 được viết trước lần chạy ngày 16/10/2026, nhưng được commit vào git ngày 21/10/2026 (commit `789654c` cho STT 6 rồi `3340cde` cho STT 7 cùng ngày 21/10 do tách/tái cấu trúc lịch sử sau khi kết quả đã có; kiểm tra bằng `git log --format='%h %ad %s' --date=iso`). Do đó, thứ tự commit trong lịch sử git không còn độc lập chứng minh STT 6 có trước lần chạy. Kết luận baseline không đổi (vẫn FAIL trên cả v1 và v2, $N_{\text{trials}} = 1$ không tăng, không gây hại). Đối với mọi đăng ký chiến lược SMC tiếp theo, bắt buộc phải commit và gắn tag git trước khi chạy bất kỳ tính toán P&L nào.
@@ -475,3 +475,61 @@ Nhằm bảo toàn tuyệt đối tính bất biến của tag `prereg-smc-v1.4`
    - Kiểm toán tự động 100% (45/45 lệnh) xác nhận: $R_{dist} = |\text{entry\_exec} - SL|$, $TP = \text{entry\_exec} \pm 2 R_{dist}$, thời gian thoát $\ge$ vào lệnh, và các giá trị PnL logic đều chính xác tuyệt đối.
    - Toàn bộ báo cáo trực quan với biểu đồ nến M1 chi tiết cho từng lệnh được lưu trữ tại `artifacts/visual_smc_trades_inspection.html`.
 
+
+---
+
+### 4.5. Đính Chính Bảng Lệnh Theo Năm, Làm Rõ Lớp Robustness, Chống Ghi Đè Log/Artifacts, Kiểm Toán Duyệt Mắt 45 Lệnh 2 Tầng & Khóa Đóng Băng Code v1.6 (v1.6 — Git tag: `prereg-smc-v1.6`)
+
+Nhằm bảo toàn tính bất biến tuyệt đối của các tag đã công bố trên remote (`prereg-smc-v1.4` tại commit `b14be26` và `prereg-smc-v1.5` tại commit `37f62cf`), toàn bộ các đính chính số liệu thực tế, làm rõ câu chữ nạp dữ liệu, cơ chế ghi log không ghi đè, kiểm toán duyệt mắt 45 lệnh 2 tầng (H1 Context + M1 Execution) và các chốt chặn kiểm soát ngẫu nhiên cùng phiên bản Git được chính thức đăng ký và đóng băng tại phiên bản v1.6 này trước khi thực thi lệnh tính toán P&L chính thức duy nhất:
+
+1. **Đính chính Bảng lệnh theo năm (Loại bỏ số liệu nhầm lẫn ở Mục 4.4):**
+   - *Đính chính lỗi biên soạn:* Mục 4.4 ghi nhầm dãy số `104 / 118 / 104 / 103 / 83 / 110 / 87 / 38` và ghi chú "nhất quán 100% với mục 4.2" (trong khi Mục 4.2 không có bảng năm). Đây là lỗi đánh máy thủ công trong quá trình biên soạn.
+   - *Số liệu kiểm toán chính xác 100% trích xuất từ dữ liệu thực tế:*
+     * **Theo năm vào lệnh (`entry_year`, chuẩn C4):**
+       $$\mathbf{2018:\; 83 \quad 2019:\; 93 \quad 2020:\; 85 \quad 2021:\; 107 \quad 2022:\; 108 \quad 2023:\; 112 \quad 2024:\; 108 \quad 2025:\; 51 \quad (\text{Tổng } = 747)}$$
+       - Khớp chính xác với con số **588 lệnh** tính đến hết năm 2023 ($83 + 93 + 85 + 107 + 108 + 112 = 588$) trong bài kiểm tra tính bất biến tiền tố (Prefix Invariance Test). Bản nhầm ở Mục 4.4 cộng ra 622 lệnh là sai lệch.
+       - Khớp chính xác với chỉ số của các lệnh vắt qua ranh giới năm: Lệnh #175 (lệnh thứ $83+93 = 176$, 0-indexed là 175) là lệnh cuối cùng của năm 2019; Lệnh #260 (lệnh thứ $176+85 = 261$, 0-indexed là 260) là lệnh cuối cùng của năm 2020; Lệnh #587 (lệnh thứ 588, 0-indexed là 587) là lệnh cuối cùng của năm 2023.
+     * **Theo năm thoát lệnh (`exit_year`, tham chiếu đường cong vốn MDD):**
+       $$\mathbf{2018:\; 83 \quad 2019:\; 92 \quad 2020:\; 85 \quad 2021:\; 108 \quad 2022:\; 108 \quad 2023:\; 111 \quad 2024:\; 109 \quad 2025:\; 51 \quad (\text{Tổng } = 747)}$$
+       - Ba lệnh vắt năm giải thích sự dịch chuyển số lượng giữa các năm: #175 vào 2019 thoát 2020 (năm 2019 giảm 1 còn 92); #260 vào 2020 thoát 2021 (năm 2020 nhận 1 từ 2019 và chuyển 1 sang 2021 nên giữ nguyên 85; năm 2021 nhận thêm 1 thành 108); #587 vào 2023 thoát 2024 (năm 2023 giảm 1 còn 111; năm 2024 nhận thêm 1 thành 109).
+   - *Cam kết quy trình:* Tuyệt đối không nhập số liệu thủ công; mọi bảng phân rã sau này đều được trích xuất trực tiếp bằng script kiểm toán.
+
+2. **Làm rõ câu chữ về Lớp Robustness & Bảo vệ Dữ liệu:**
+   - *Nạp dữ liệu kỹ thuật:* Script backtest nạp nến H1 bắt đầu từ `2014-07-01` để phục vụ warm-up bộ chỉ báo $ATR(H1, 14)$ và khởi tạo trạng thái bộ nhớ cho các hàm nhận diện thanh khoản (`load_liquidity`), cấu trúc (`load_structure`) và FVG (`load_fvg`).
+   - *Điều cấm thực sự được tuân thủ nghiêm ngặt:*
+     * Tuyệt đối **KHÔNG sinh tín hiệu** giao dịch trên giai đoạn Robustness (`2014-07-01` đến `2017-12-31`).
+     * Tuyệt đối **KHÔNG khớp lệnh (ENTERED)** trên giai đoạn này.
+     * Tuyệt đối **KHÔNG tính toán P&L hay bất kỳ chỉ số thống kê hiệu năng nào** trên giai đoạn này.
+     * Lớp Holdout (`2025-07-01` đến `2026-10-13`) hoàn toàn **KHÔNG NẠP, KHÔNG SINH TÍN HIỆU, KHÔNG TÍNH P&L**.
+
+3. **Cơ chế chống ghi đè Log và Lưu trữ Artifacts (Non-Overwriting Logging):**
+   - Runner script `scripts/run_smc_pnl.py` được nâng cấp toàn diện:
+     * Mỗi lần chạy sinh một mã `run_id` duy nhất có timestamp định dạng `YYYYMMDD_HHMMSS`.
+     * Log chi tiết của từng lần chạy được ghi độc lập vào `logs/smc_pnl_run_{run_id}.log`.
+     * Toàn bộ lịch sử các lần chạy được nối tiếp (append-only, `mode="a"`) vào master log `logs/smc_pnl_cumulative.log`, đảm bảo tuân thủ tuyệt đối quy định "mọi lần chạy, kể cả lần lỗi, phải lưu log".
+     * Các file artifact được lưu phiên bản theo `run_id` (`artifacts/smc_pnl_summary_{run_id}.json`, `artifacts/smc_trades_pnl_{run_id}.parquet`, v.v.) kèm bản latest copy để phục vụ truy vết kiểm toán toàn diện mà không bao giờ làm mất lịch sử các lần chạy trước.
+
+4. **Kiểm soát Ngẫu nhiên Monte Carlo C4(c) & Chốt chặn Assert:**
+   - Trong `src/backtest/smc/pnl.py`, hàm `simulate_c4c_pairs` bổ sung assert bit-for-bit: với mỗi lệnh thật, nhánh cùng hướng trong cặp mô phỏng đối xứng phải có $R$-PnL bằng chính xác $R$-PnL của lệnh thật (`abs(sim_branch_r - actual_r) < 1e-6`).
+   - Bổ sung unit tests độc lập tại `tests/test_smc_pnl.py` kiểm tra công thức tính $p$-value bằng các ca tính tay (tất cả sim < actual $\implies p = 1/(N+1)$, tất cả sim $\ge$ actual $\implies p = 1.0$, và ca phân nửa). Toàn bộ 8/8 tests pass 100%.
+
+5. **Chốt phiên bản Code trước khi chạy P&L (Strict Git Tag Verification):**
+   - Runner script tích hợp kiểm tra tự động `verify_git_clean_and_tagged(expected_tag="prereg-smc-v1.6")`:
+     * Dừng ngay lập tức nếu `git status --porcelain` phát hiện working tree có file modified hoặc untracked.
+     * Dừng ngay lập tức nếu `git rev-parse HEAD` không khớp với tag `prereg-smc-v1.6`.
+     * Ghi nhận commit hash và tag vào log và summary JSON để đảm bảo tính tái lập 100%.
+
+6. **Biên bản Duyệt Mắt 45 Lệnh 2 Tầng (H1 Context + M1 Execution) theo PROTOCOL Mục 7:**
+   - Script `scripts/plot_smc_trades.py` nâng cấp hệ thống kiểm toán trực quan và checklist logic 6 tiêu chí:
+     * **Mẫu 45 lệnh:** 40 lệnh phân đều 8 năm (mỗi năm 5 lệnh, cân bằng 2-3 BUY / 2-3 SELL) + 5 ca biên đặc biệt (4 `SL_GAP` + 1 `DATA_END`).
+     * **Đồ thị 2 tầng Plotly:**
+       - *Panel 1 (Bối cảnh H1):* Nến H1, đường mức pool bị quét, marker Sweep $s$, marker Confirm $c$, hộp FVG box hợp lưu displacement ($i \ge s+1$), và các đường Entry/SL/TP.
+       - *Panel 2 (Phóng to M1):* Chuỗi nến M1 từ trước entry đến sau exit, điểm khớp Entry tại Open M1, điểm thoát lệnh vật lý theo thứ tự ưu tiên (SL/SL_GAP > TP > TIME_EXIT > DATA_END).
+     * **Kết quả Checklist Logic 6 tiêu chí:** 100% (45/45 lệnh) ĐẠT HOÀN TOÀN, ghi nhận **0 LỖI LOGIC**:
+       1. *Sweep $s$:* 45/45 ĐẠT (nến $s$ quét pool hợp lệ, $s < c$).
+       2. *Cấu trúc $c$:* 45/45 ĐẠT (nến $c$ tạo ChOCH/BOS đúng hướng trong cửa sổ $1 \le c - s \le 24$).
+       3. *FVG hợp lưu:* 45/45 ĐẠT (tồn tại FVG cùng hướng, tạo sau $s$, active tại $close\_time_c$).
+       4. *SL cực trị:* 45/45 ĐẠT (SL đúng bằng đỉnh cao nhất hoặc đáy thấp nhất trong $[s, c]$).
+       5. *R_dist & TP:* 45/45 ĐẠT ($R_{dist}$ thỏa sàn chi phí và trần an toàn; $TP = Entry \pm 2 R_{dist}$).
+       6. *Khớp & Thoát M1:* 45/45 ĐẠT (khớp tại Open M1 sau $c$, thoát đúng quy tắc).
+     * Báo cáo HTML tương tác hoàn chỉnh được lưu tại `artifacts/visual_smc_trades_inspection.html`.

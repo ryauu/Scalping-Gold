@@ -369,6 +369,19 @@ def simulate_c4c_pairs(
         r_sell = compute_trade_r("SELL", entry_exec_sell, exit_p_sell, r_dist_sell)
         pnl_sells.append(r_sell)
 
+        # Chốt chặn kiểm toán: Nhánh cùng hướng trong cặp C4(c) BẮT BUỘC phải khớp bit-for-bit với lệnh thật
+        actual_r = row.get("pnl_r")
+        if actual_r is not None and pd.notna(actual_r):
+            actual_r_val = float(actual_r)
+            if row["direction"] == "BUY":
+                assert abs(r_buy - actual_r_val) < 1e-4, (
+                    f"Lỗi logic C4(c): Nhánh BUY mô phỏng ({r_buy:+.4f}R) không khớp lệnh BUY thật ({actual_r_val:+.4f}R) tại lệnh #{row.name}"
+                )
+            else:
+                assert abs(r_sell - actual_r_val) < 1e-4, (
+                    f"Lỗi logic C4(c): Nhánh SELL mô phỏng ({r_sell:+.4f}R) không khớp lệnh SELL thật ({actual_r_val:+.4f}R) tại lệnh #{row.name}"
+                )
+
     return np.array(pnl_buys, dtype=np.float64), np.array(pnl_sells, dtype=np.float64)
 
 

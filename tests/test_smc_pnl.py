@@ -222,6 +222,141 @@ class TestSMCPnLHandCalculated(unittest.TestCase):
         self.assertEqual(res1["n_exceed"], res2["n_exceed"])
         self.assertAlmostEqual(res1["sim_mean"], res2["sim_mean"], places=7)
 
+    def test_07_simulate_c4c_pairs_same_direction_identity(self):
+        """KIỂM TOÁN C4(c): Nhánh cùng hướng trong simulate_c4c_pairs BẮT BUỘC bằng bit-for-bit với lệnh thật."""
+        from src.backtest.smc.pnl import simulate_c4c_pairs
+
+        base_t = pd.Timestamp("2024-05-10 00:00:00")
+        h1_times = [base_t + pd.Timedelta(hours=i) for i in range(40)]
+        h1_df = pd.DataFrame([{
+            "time_utc": t, "open": 2000.0, "high": 2010.0, "low": 1990.0, "close": 2000.0, "atr_14": 10.0
+        } for t in h1_times])
+
+        # Tạo chuỗi nến M1
+        m1_times = [base_t + pd.Timedelta(minutes=i) for i in range(40 * 60)]
+        # Cho giá dao động nhẹ quanh 2000
+        m1_rows = []
+        for i, t in enumerate(m1_times):
+            m1_rows.append({
+                "time_utc": t,
+                "open": 2000.0 + (i % 5) * 0.5,
+                "high": 2002.0 + (i % 5) * 0.5,
+                "low": 1998.0 + (i % 5) * 0.5,
+                "close": 2000.0 + (i % 5) * 0.5,
+            })
+        m1_df = pd.DataFrame(m1_rows)
+
+        spreads_cfg = {
+            "spread_multiplier": 1.25,
+            "slip_points": 5.0,
+            "point_value_usd": 0.01,
+            "yearly_median_spreads_points": {"2024": 31.0},
+        }
+
+        # 1 lệnh BUY và 1 lệnh SELL
+        t_entry1 = pd.Timestamp("2024-05-10 05:00:00")
+        t_entry2 = pd.Timestamp("2024-05-10 08:00:00")
+
+        # Giả lập lệnh thật
+        # BUY: entry_open = 2000.0, sl = 1990.0
+        spread_val = 31.0 * 1.25 * 0.01  # 0.3875
+        slip_val = 0.05
+        entry_exec_buy = 2000.0 + spread_val + slip_val  # 2000.4375
+        sl_buy = 1990.0
+        r_dist_buy = entry_exec_buy - sl_buy  # 10.4375
+        tp_buy = entry_exec_buy + 2.0 * r_dist_buy
+
+        # Thoát lệnh thật 1 qua scan_position_exit_m1
+        from src.backtest.smc.signals import scan_position_exit_m1
+        max_h1_time = t_entry1 + pd.Timedelta(hours=24)
+        split_end = pd.Timestamp("2025-06-30 23:59:00")
+        t_ex1, r_ex1, p_ex1 = scan_position_exit_m1(
+            "BUY", t_entry1, entry_exec_buy, sl_buy, tp_buy, spread_val, slip_val, m1_df, max_h1_time, split_end
+        )
+        real_pnl_1 = compute_trade_r("BUY", entry_exec_buy, p_ex1, r_dist_buy)
+
+        # SELL: entry_open = 2002.0, sl = 2012.0
+        entry_exec_sell = 2002.0 - slip_val  # 2001.95
+        sl_sell = 2012.0
+        r_dist_sell = sl_sell - entry_exec_sell  # 10.05
+        tp_sell = entry_exec_sell - 2.0 * r_dist_sell
+        t_ex2, r_ex2, p_ex2 = scan_position_exit_m1(
+            "SELL", t_entry2, entry_exec_sell, sl_sell, tp_sell, spread_val, slip_val, m1_df, t_entry2 + pd.Timedelta(hours=24), split_end
+        )
+        real_pnl_2 = compute_trade_r("SELL", entry_exec_sell, p_ex2, r_dist_sell)
+
+        trades_df = pd.DataFrame([
+            {
+                "direction": "BUY",
+                "close_time_c": t_entry1,
+                "entry_open": 2000.0,
+                "entry_exec": entry_exec_buy,
+                "sl": sl_buy,
+                "tp": tp_buy,
+                "r_dist": r_dist_buy,
+                "exit_time": t_ex1,
+                "exit_reason": r_ex1,
+                "exit_price": p_ex1,
+                "pnl_r": real_pnl_1,
+            },
+            {
+                "direction": "SELL",
+                "close_time_c": t_entry2,
+                "entry_open": 2002.0,
+                "entry_exec": entry_exec_sell,
+                "sl": sl_sell,
+                "tp": tp_sell,
+                "r_dist": r_dist_sell,
+                "exit_time": t_ex2,
+                "exit_reason": r_ex2,
+                "exit_price": p_ex2,
+                "pnl_r": real_pnl_2,
+            },
+        ])
+
+        pnl_buys, pnl_sells = simulate_c4c_pairs(
+            trades_df, m1_df, h1_df, spreads_cfg=spreads_cfg, split_end_str=str(split_end)
+        )
+
+        # KHẲNG ĐỊNH ĐẲNG THỨC:
+        # Lệnh 0 là BUY: nhánh BUY mô phỏng PHẢI BẰNG EXACT thực tế
+        self.assertAlmostEqual(pnl_buys[0], real_pnl_1, places=5)
+        # Lệnh 1 là SELL: nhánh SELL mô phỏng PHẢI BẰNG EXACT thực tế
+        self.assertAlmostEqual(pnl_sells[1], real_pnl_2, places=5)
+
+    def test_08_monte_carlo_p_value_hand_calculated(self):
+        """Kiểm tra công thức toán học p-value: p = (1 + n_exceed) / (N_sim + 1)."""
+        # Ca 1: Không có lần nào mô phỏng ngẫu nhiên vượt được actual (n_exceed = 0)
+        # p = (1 + 0) / (1000 + 1) = 1 / 1001
+        buys_low = np.array([-1.0, -1.0])
+        sells_low = np.array([-1.0, -1.0])
+        res_min = run_monte_carlo_permutation(buys_low, sells_low, actual_expectancy=10.0, n_simulations=1000, seed=42)
+        self.assertEqual(res_min["n_exceed"], 0)
+        self.assertAlmostEqual(res_min["p_value"], 1.0 / 1001.0, places=7)
+
+        # Ca 2: Mọi lần mô phỏng ngẫu nhiên đều >= actual (n_exceed = 1000)
+        # p = (1 + 1000) / (1000 + 1) = 1001 / 1001 = 1.0
+        buys_high = np.array([2.0, 2.0])
+        sells_high = np.array([2.0, 2.0])
+        res_max = run_monte_carlo_permutation(buys_high, sells_high, actual_expectancy=-10.0, n_simulations=1000, seed=42)
+        self.assertEqual(res_max["n_exceed"], 1000)
+        self.assertAlmostEqual(res_max["p_value"], 1.0, places=7)
+
+        # Ca 3: Kiểm tra tính đúng đắn với mảng đối xứng BUY (+1) / SELL (-1)
+        # choices chọn BUY hoặc SELL với p = 0.5
+        # sim_mean lý thuyết = (1.0 - 1.0) / 2 = 0.0
+        buys = np.array([1.0, 1.0])
+        sells = np.array([-1.0, -1.0])
+        res_sym = run_monte_carlo_permutation(buys, sells, actual_expectancy=0.0, n_simulations=1000, seed=42)
+        # Xác suất để choices = (BUY, BUY) là 0.25 -> E = +1.0 >= 0
+        # Xác suất choices = (BUY, SELL) hoặc (SELL, BUY) là 0.50 -> E = 0.0 >= 0
+        # Xác suất choices = (SELL, SELL) là 0.25 -> E = -1.0 < 0
+        # Lý thuyết: 75% số lần có E >= 0 -> n_exceed ~ 750
+        self.assertTrue(700 <= res_sym["n_exceed"] <= 800)
+        expected_p = (1 + res_sym["n_exceed"]) / 1001.0
+        self.assertAlmostEqual(res_sym["p_value"], expected_p, places=7)
+
 
 if __name__ == "__main__":
     unittest.main()
+
