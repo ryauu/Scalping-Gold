@@ -268,33 +268,27 @@ def scan_position_exit_m1(
         lo = lows[idx]
         cl = closes[idx]
 
-        # Kiểm tra nếu vượt split_end -> DATA_END
-        if t >= split_end:
-            if dir_clean == "BUY":
-                return t, "DATA_END", cl - slip
-            else:
-                return t, "DATA_END", cl + spread + slip
+        # 1. SL_GAP: Giá mở nến M1 nhảy gap vượt qua mức SL (C5.2)
+        # Bắt buộc kiểm tra TRƯỚC TIME_EXIT để tránh nhãn TIME_EXIT che mất SL_GAP
+        if dir_clean == "BUY" and op <= sl:
+            return t, "SL_GAP", op - slip
+        if dir_clean == "SELL" and (op + spread) >= sl:
+            return t, "SL_GAP", op + spread + slip
 
-        # Kiểm tra nếu vượt max_exit_time -> TIME_EXIT
+        # 2. TIME_EXIT: Đạt mốc thời gian giữ lệnh tối đa (24 hàng H1)
+        # Thoát tại Open của nến M1 này (giá mở nến đầu tiên tại hoặc sau max_exit_time)
         if t >= max_exit_time:
             if dir_clean == "BUY":
                 return t, "TIME_EXIT", op - slip
             else:
                 return t, "TIME_EXIT", op + spread + slip
 
-        # 1. SL_GAP
-        if dir_clean == "BUY" and op <= sl:
-            return t, "SL_GAP", op - slip
-        if dir_clean == "SELL" and (op + spread) >= sl:
-            return t, "SL_GAP", op + spread + slip
-
-        # 2. SL thông thường
+        # 3. SL thông thường & 4. TP trong nến M1
         sl_hit = (lo <= sl) if dir_clean == "BUY" else ((hi + spread) >= sl)
-        # 3. TP
         tp_hit = (hi >= tp) if dir_clean == "BUY" else ((lo + spread) <= tp)
 
         if sl_hit and tp_hit:
-            # Ưu tiên SL
+            # Ưu tiên SL khi cả 2 cùng chạm trong 1 nến M1 (C5.2)
             return (t, "SL", sl - slip) if dir_clean == "BUY" else (t, "SL", sl + slip)
         if sl_hit:
             return (t, "SL", sl - slip) if dir_clean == "BUY" else (t, "SL", sl + slip)
@@ -302,12 +296,20 @@ def scan_position_exit_m1(
             # Gap qua TP chỉ lấy đúng mức TP theo C3
             return (t, "TP", tp - slip) if dir_clean == "BUY" else (t, "TP", tp + slip)
 
-    # Nếu duyệt hết m1 mà chưa chạm
+        # 5. DATA_END: Ranh giới kết thúc phân lớp split_end (C5.3)
+        # Chỉ kích hoạt nếu nến t là nến cuối cùng (t >= split_end) và chưa chạm SL/TP trong nến
+        if t >= split_end:
+            if dir_clean == "BUY":
+                return t, "DATA_END", cl - slip
+            else:
+                return t, "DATA_END", cl + spread + slip
+
+    # Nếu duyệt hết m1 mà chưa chạm (dữ liệu M1 bị cắt ngắn)
     last_t = sub_times.iloc[-1]
     if dir_clean == "BUY":
-        return last_t, "TIME_EXIT", closes[-1] - slip
+        return last_t, "DATA_END", closes[-1] - slip
     else:
-        return last_t, "TIME_EXIT", closes[-1] + spread + slip
+        return last_t, "DATA_END", closes[-1] + spread + slip
 
 
 def generate_smc_signals(

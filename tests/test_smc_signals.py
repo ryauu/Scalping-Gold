@@ -667,7 +667,158 @@ class TestSMCSignals(unittest.TestCase):
                         self.assertTrue(np.allclose(sig_sub[col].values, expected[col].values))
                     else:
                         self.assertTrue((sig_sub[col].values == expected[col].values).all())
+    def test_14_exit_reasons_hand_calculated(self):
+        """VÁ LỖ HỔNG TEST THOÁT LỆNH: Kiểm tra tính tay chuẩn xác từng lý do thoát lệnh, công thức giá và ưu tiên SL > TP."""
+        t_entry = pd.Timestamp("2024-05-10 10:00:00")
+        t_split_end = pd.Timestamp("2024-05-10 23:59:00")
+        t_max_exit = pd.Timestamp("2024-05-11 10:00:00")
+        spread = 0.30
+        slip = 0.05
 
+        # 1. Lệnh BUY: Entry = 2000.35, SL = 1990.0, TP = 2020.0
+        # a) Chạm SL thông thường trong nến
+        m1_buy_sl = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2000.0, "high": 2005.0, "low": 1989.0, "close": 1992.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "BUY", t_entry, 2000.35, 1990.0, 2020.0, spread, slip, m1_buy_sl, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "SL")
+        self.assertAlmostEqual(p_ex, 1990.0 - 0.05)  # 1989.95
+
+        # b) Chạm SL_GAP (Open nhảy gap vượt SL)
+        m1_buy_sl_gap = pd.DataFrame([{
+            "time_utc": t_entry, "open": 1988.0, "high": 1995.0, "low": 1987.0, "close": 1992.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "BUY", t_entry, 2000.35, 1990.0, 2020.0, spread, slip, m1_buy_sl_gap, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "SL_GAP")
+        self.assertAlmostEqual(p_ex, 1988.0 - 0.05)  # 1987.95
+
+        # c) Chạm TP thông thường trong nến
+        m1_buy_tp = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2000.0, "high": 2025.0, "low": 1998.0, "close": 2022.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "BUY", t_entry, 2000.35, 1990.0, 2020.0, spread, slip, m1_buy_tp, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "TP")
+        self.assertAlmostEqual(p_ex, 2020.0 - 0.05)  # 2019.95 (TP - slip)
+
+        # d) Chạm cả SL và TP trong cùng một nến M1 -> Bắt buộc ưu tiên SL (C5.2)
+        m1_buy_both = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2000.0, "high": 2025.0, "low": 1985.0, "close": 2000.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "BUY", t_entry, 2000.35, 1990.0, 2020.0, spread, slip, m1_buy_both, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "SL")
+        self.assertAlmostEqual(p_ex, 1990.0 - 0.05)  # 1989.95
+
+        # 2. Lệnh SELL: Entry = 1999.95, SL = 2010.0, TP = 1980.0
+        # a) Chạm SL thông thường (High + spread >= SL)
+        m1_sell_sl = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2000.0, "high": 2009.8, "low": 1995.0, "close": 1998.0
+        }])
+        # High = 2009.8 + spread 0.30 = 2010.1 >= 2010.0 -> SL hit!
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "SELL", t_entry, 1999.95, 2010.0, 1980.0, spread, slip, m1_sell_sl, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "SL")
+        self.assertAlmostEqual(p_ex, 2010.0 + 0.05)  # 2010.05 (SL + slip)
+
+        # b) Chạm SL_GAP (Open + spread >= SL)
+        m1_sell_sl_gap = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2009.8, "high": 2015.0, "low": 2008.0, "close": 2012.0
+        }])
+        # Open = 2009.8 + 0.30 = 2010.1 >= 2010.0 -> SL_GAP
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "SELL", t_entry, 1999.95, 2010.0, 1980.0, spread, slip, m1_sell_sl_gap, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "SL_GAP")
+        self.assertAlmostEqual(p_ex, 2009.8 + 0.30 + 0.05)  # 2010.15
+
+        # c) Chạm TP thông thường (Low + spread <= TP)
+        m1_sell_tp = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2000.0, "high": 2002.0, "low": 1979.5, "close": 1981.0
+        }])
+        # Low = 1979.5 + 0.30 = 1979.8 <= 1980.0 -> TP hit!
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "SELL", t_entry, 1999.95, 2010.0, 1980.0, spread, slip, m1_sell_tp, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "TP")
+        self.assertAlmostEqual(p_ex, 1980.0 + 0.05)  # 1980.05 (TP + slip)
+
+        # d) Chạm cả SL và TP cho SELL -> Bắt buộc ưu tiên SL
+        m1_sell_both = pd.DataFrame([{
+            "time_utc": t_entry, "open": 2000.0, "high": 2015.0, "low": 1975.0, "close": 2000.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "SELL", t_entry, 1999.95, 2010.0, 1980.0, spread, slip, m1_sell_both, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "SL")
+        self.assertAlmostEqual(p_ex, 2010.0 + 0.05)  # 2010.05
+
+        # 3. DATA_END tại split_end
+        # a) BUY: thoát tại Close - slip
+        m1_buy_data_end = pd.DataFrame([{
+            "time_utc": t_split_end, "open": 2000.0, "high": 2005.0, "low": 1995.0, "close": 2002.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "BUY", t_split_end, 2000.0, 1980.0, 2030.0, spread, slip, m1_buy_data_end, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "DATA_END")
+        self.assertAlmostEqual(p_ex, 2002.0 - 0.05)  # 2001.95
+
+        # b) SELL: thoát tại Close + spread + slip
+        m1_sell_data_end = pd.DataFrame([{
+            "time_utc": t_split_end, "open": 2000.0, "high": 2005.0, "low": 1995.0, "close": 2002.0
+        }])
+        t_ex, reason, p_ex = scan_position_exit_m1(
+            "SELL", t_split_end, 2000.0, 2020.0, 1970.0, spread, slip, m1_sell_data_end, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason, "DATA_END")
+        self.assertAlmostEqual(p_ex, 2002.0 + 0.30 + 0.05)  # 2002.35
+
+    def test_15_exit_sl_gap_priority_over_time_exit(self):
+        """KIỂM TRA CHỐT CHẶN: SL_GAP không bị nhãn TIME_EXIT che mất tại mốc max_exit_time."""
+        t_entry = pd.Timestamp("2024-05-10 10:00:00")
+        t_max_exit = pd.Timestamp("2024-05-11 10:00:00")
+        t_split_end = pd.Timestamp("2025-06-30 23:59:00")
+        spread = 0.30
+        slip = 0.05
+
+        # Nến M1 tại đúng max_exit_time
+        # Ca 1: Open bình thường (op > SL) -> TIME_EXIT
+        m1_normal = pd.DataFrame([{
+            "time_utc": t_max_exit, "open": 2000.0, "high": 2005.0, "low": 1995.0, "close": 2000.0
+        }])
+        _, reason_norm, p_norm = scan_position_exit_m1(
+            "BUY", t_entry, 2000.0, 1990.0, 2020.0, spread, slip, m1_normal, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason_norm, "TIME_EXIT")
+        self.assertAlmostEqual(p_norm, 2000.0 - 0.05)
+
+        # Ca 2: Open nhảy gap dưới SL (op <= SL) -> BẮT BUỘC trả SL_GAP chứ không được trả TIME_EXIT
+        m1_gap = pd.DataFrame([{
+            "time_utc": t_max_exit, "open": 1985.0, "high": 1990.0, "low": 1980.0, "close": 1988.0
+        }])
+        _, reason_gap, p_gap = scan_position_exit_m1(
+            "BUY", t_entry, 2000.0, 1990.0, 2020.0, spread, slip, m1_gap, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason_gap, "SL_GAP")
+        self.assertAlmostEqual(p_gap, 1985.0 - 0.05)
+
+        # Ca 3: SELL với Open nhảy gap qua SL (op + spread >= SL) tại max_exit_time -> BẮT BUỘC SL_GAP
+        m1_sell_gap = pd.DataFrame([{
+            "time_utc": t_max_exit, "open": 2015.0, "high": 2020.0, "low": 2010.0, "close": 2012.0
+        }])
+        _, reason_sell_gap, p_sell_gap = scan_position_exit_m1(
+            "SELL", t_entry, 2000.0, 2010.0, 1980.0, spread, slip, m1_sell_gap, t_max_exit, t_split_end
+        )
+        self.assertEqual(reason_sell_gap, "SL_GAP")
+        self.assertAlmostEqual(p_sell_gap, 2015.0 + 0.30 + 0.05)
 
 
 if __name__ == "__main__":
