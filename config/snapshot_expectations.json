@@ -1,0 +1,11 @@
+{
+  "_description": "Kỳ vọng kiểm tra bản chụp MT5 GOLD_M1 tại mốc 2026-10-13 (sha8: decf3c12). Dùng để kiểm chứng tính toàn vẹn của snapshot hiện tại.",
+  "snapshot_date": "2026-10-13",
+  "symbol": "GOLD",
+  "source": "mt5",
+  "raw_sha256": "decf3c126908b13480327287c665c6922fe906751644756a1862c0feb67da541",
+  "n_raw": 4363757,
+  "n_cut": 9890,
+  "clean_rows": 4353867,
+  "h1_rows": 72955
+}

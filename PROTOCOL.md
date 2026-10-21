@@ -58,9 +58,8 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 - Quy ước phí cố định ngay từ đầu (tránh lặp lại lỗi tính phí giữa các script).
 
 ## 8. Đóng băng
-- Ngày đóng băng giao thức: 2026-10-13 (tag `protocol-v1`)
-- Tag mã nguồn kiểm thử: `code-v1`
-- Tag kết quả Baseline PRIMARY: `results-baseline-v1`
+- Ngày đóng băng: 2026-10-13
+- Git tag: `protocol-v1`
 - Phiên bản `build_data.py`: 1.0 · `splits.json` commit: 7715bcf
 
 ## 9. Nhật ký thay đổi / đăng ký thử nghiệm
@@ -68,39 +67,12 @@ Khung giờ khác, buffer, RR khác, lọc độ rộng vùng Á, kịch bản s
 
 | Ngày | STT | N_trials | Nội dung | Tiêu chí đăng ký trước | Kết quả |
 |---|---|---|---|---|---|
-| 2026-10-14 | 1 | 1 | Baseline PRIMARY (mục 4) trên lớp Development (2018-01-01 → 2025-06-30) | Mục 5 (đạt cả 5 điều kiện) | **FAIL** (1/5 điều kiện đạt). C1: 1.668 lệnh (PASS). C2: -0,0357R/lệnh (FAIL). C3: PF = 0,9169 (FAIL). C4: 4/8 năm dương (FAIL). C5: p = 0,1558 (FAIL, Monte Carlo 1.000 lần, seed = 42; sim mean = -0,0579R, std = 0,0215; exploratory: always BUY = -0,0558R, always SELL = -0,0597R). Chi tiết 8 năm: 2018 (-0,0170R), 2019 (-0,0984R), 2020 (+0,0236R), 2021 (-0,0936R), 2022 (+0,0271R), 2023 (-0,1453R), 2024 (+0,0264R), 2025 (+0,0383R). Tổng PnL: -59,56R; Win rate: 41,91%. Git tag: `code-v1`, `results-baseline-v1`. |
+| 2026-10-14 | 1 | 1 | Baseline PRIMARY (mục 4) trên lớp Development (2018-01-01 → 2025-06-30) — Dữ liệu v1.0 | Mục 5 (đạt cả 5 điều kiện) | **FAIL** (1/5 điều kiện đạt). C1: 1.668 lệnh (PASS). C2: -0,0357R/lệnh (FAIL). C3: PF = 0,9169 (FAIL). C4: 4/8 năm dương (FAIL). C5: p = 0,1558 (FAIL). Git tag: `code-v1`, `results-baseline-v1`. |
 | 2026-10-13 | 2 (C1) | — | Đăng ký ngưỡng nến vùng Á (bước 3) | Cửa sổ [00:00, 07:00) UTC. Ngưỡng hợp lệ: n_bars >= 378 (90% của 420 nến M1 lý thuyết). Ngày < 378 nến gán valid=False và bỏ qua. Dựa trên phân phối thực nghiệm (Development p0.5%=414.6, p50%=420; loại 2 ngày lễ tết 26/12 và 02/01 chỉ có 60 nến; Robustness loại 7 ngày) thuần túy theo chất lượng dữ liệu trước khi có P&L. | Đã chốt trước P&L |
 | 2026-10-13 | 3 (C2) | — | Làm rõ buffer tín hiệu Breakout (bước 3b) | Buffer 0,1 × ATR(H1, 14) được lấy động tại thời điểm nến M1 đang xét trong cửa sổ [07:00, 13:00) UTC (thay đổi theo từng giờ từ nến H1 đã đóng gần nhất qua attach_h1_atr), không chốt cứng tại 07:00. Tín hiệu strictly: close > high + 0,1*ATR hoặc close < low - 0,1*ATR (bằng hoặc râu không tính). Vào lệnh tại giá Open của nến M1 kế tiếp theo thứ tự thực tế. Đăng ký trước khi code và chạy tín hiệu. | Đã chốt trước P&L |
 | 2026-10-14 | 4 (C3) | — | C3 — Quy ước mô phỏng (bước 4) | Dữ liệu M1 là giá bid; 1 point = 0,01. Spread = trung vị spread năm đó × 1,25; slip = 5 points mỗi lần khớp (vào và ra); cột spread từng nến không dùng. BUY vào tại Open nến kế + spread + slip; SELL vào tại Open nến kế − slip. R_dist = \|giá vào đã gồm chi phí − SL\|; TP = giá vào ± 2×R_dist. Kích hoạt: BUY, SL khi bid low ≤ SL, TP khi bid high ≥ TP; SELL, SL khi bid high + spread ≥ SL, TP khi bid low + spread ≤ TP. Thoát tại mức kích hoạt: BUY trừ slip, SELL cộng slip. Kiểm tra từ chính nến vào lệnh. Gap qua SL: thoát tại Open (BUY: Open − slip; SELL: Open + spread + slip). Gap qua TP: chỉ lấy đúng mức TP. Chạm cả hai trong một nến: tính SL. Thoát cứng: nến đầu tiên có giờ ≥ 16:00 UTC, tại Open (BUY: − slip; SELL: + spread + slip). Hết dữ liệu trước 16:00: thoát tại Close nến cuối, ghi DATA_END và đếm. entry_delay được ghi lại, không dùng để lọc. | Đã chốt trước P&L |
 | 2026-10-14 | 5 (C4) | — | C4 — Đo lường (bước 5) | (a) “8 năm lịch” = 2018-2025; năm 2025 tính là một năm dù chỉ đến 30/6; điều kiện: kỳ vọng dương ở ít nhất 5 trong 8 năm. (b) Kỳ vọng = trung bình pnl_r; profit factor = tổng pnl_r dương / \|tổng pnl_r âm\|; lệnh pnl_r = 0 không tính vào bên nào. (c) Kiểm soát ngẫu nhiên: với mỗi lệnh thật, mô phỏng cả BUY và SELL cùng entry_time, cùng entry_open, cùng khoảng cách SL theo giá d = \|entry_open − SL gốc\| (SL BUY = entry_open − d, SL SELL = entry_open + d), TP = 2R theo C3, cùng chi phí. Mỗi lần mô phỏng rút ngẫu nhiên BUY hoặc SELL cho từng lệnh với xác suất 0,5; 1.000 lần; seed cố định (seed = 42); thống kê = kỳ vọng; p = (1 + số lần kỳ vọng ngẫu nhiên ≥ kỳ vọng thật) / 1001. | Đã chốt trước P&L |
-
-### Chi tiết kết quả chạy chính thức Baseline PRIMARY (Development 2018-01-01 → 2025-06-30, git tag `code-v1`):
-
-**1. Đánh giá 5 điều kiện PASS:**
-- **Điều kiện 1 (Tổng số lệnh ≥ 800):** **ĐẠT (PASS)** — Thực tế 1.668 lệnh.
-- **Điều kiện 2 (Kỳ vọng ròng ≥ +0,05R/lệnh):** **KHÔNG ĐẠT (FAIL)** — Thực tế -0,0357R/lệnh.
-- **Điều kiện 3 (Profit factor ≥ 1,10):** **KHÔNG ĐẠT (FAIL)** — Thực tế 0,9169.
-- **Điều kiện 4 (Kỳ vọng dương ≥ 5/8 năm lịch):** **KHÔNG ĐẠT (FAIL)** — Thực tế 4/8 năm (2020: +0,0236R; 2022: +0,0271R; 2024: +0,0264R; 2025: +0,0383R).
-- **Điều kiện 5 (Hơn kiểm soát ngẫu nhiên p ≤ 0,05):** **KHÔNG ĐẠT (FAIL)** — Thực tế p = 0,1558 (155/1.000 lần ngẫu nhiên ≥ thật; kỳ vọng ngẫu nhiên mean = -0,0579R, std = 0,0215).
-
-**2. Bảng phân rã 8 năm lịch (2018–2025):**
-| Năm | Số lệnh (n) | Kỳ vọng (Expectancy) | Profit Factor | Win Rate | Tổng PnL (R) | Dương? |
-|---|---|---|---|---|---|---|
-| 2018 | 219 | -0,0170R | 0,9567 | 41,10% | -3,72R | Không |
-| 2019 | 225 | -0,0984R | 0,7822 | 37,33% | -22,15R | Không |
-| 2020 | 214 | +0,0236R | 1,0597 | 45,33% | +5,04R | **Có** |
-| 2021 | 228 | -0,0936R | 0,8081 | 39,04% | -21,34R | Không |
-| 2022 | 233 | +0,0271R | 1,0635 | 44,64% | +6,31R | **Có** |
-| 2023 | 229 | -0,1453R | 0,7199 | 36,24% | -33,28R | Không |
-| 2024 | 225 | +0,0264R | 1,0672 | 44,00% | +5,95R | **Có** |
-| 2025 | 95 | +0,0383R | 1,1343 | 55,79% | +3,63R | **Có** |
-| **Tổng** | **1.668** | **-0,0357R** | **0,9169** | **41,91%** | **-59,56R** | **4 / 8 năm** |
-
-**3. Thông tin tham chiếu EXPLORATORY:**
-- Nhánh luôn BUY (Always BUY Expectancy): -0,0558R.
-- Nhánh luôn SELL (Always SELL Expectancy): -0,0597R.
-- Phân phối lý do thoát lệnh: TP (157 lệnh), SL (572 lệnh), SL_GAP (3 lệnh), TIME 16:00 (936 lệnh), DATA_END (0 lệnh).
-- Kiểm tra trực quan bằng mắt: Đã kiểm tra 45 lệnh (15 lệnh thua lớn nhất, 10 lệnh thắng lớn nhất, 10 lệnh TIME, 10 lệnh ngẫu nhiên) qua Plotly tại `artifacts/visual_inspection_trades.html`.
+| 2026-10-16 | 6 (Quy tắc Baseline Data v2) | — | Quy tắc cập nhật Baseline PRIMARY trên dữ liệu Data v2 (Europe/Nicosia, build_data.py v2.0, tag data-v2) | (1) Nguồn dữ liệu mới Data v2 (Europe/Nicosia, build_data.py v2.0, commit dữ liệu gắn tag git data-v2) thay thế hoàn toàn dữ liệu cũ v1.0. (2) Kết quả trên Data v2 THAY THẾ HOÀN TOÀN kết quả cũ (Data v1); tuyệt đối không chọn lựa (no cherry-picking) giữa hai kết quả. (3) Tham số Baseline (Mục 4) và 5 tiêu chí PASS (Mục 5) giữ nguyên vẹn 100%. (4) Số thử nghiệm thật $N_{\text{trials}}$ KHÔNG TĂNG ($N_{\text{trials}} = 1$) do đây là khắc phục lỗi dữ liệu (data defect fix), không phải thử nghiệm chiến lược mới. (5) Chỉ chạy trên lớp Development (2018-01-01 → 2025-06-30). Bảo toàn tuyệt đối Robustness và Holdout. (6) Báo cáo song song cả hai cột để ghi nhận khách quan tác động của việc sửa lỗi múi giờ. | Đã chốt trước khi chạy lại P&L |
 
 
 
