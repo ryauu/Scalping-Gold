@@ -31,7 +31,7 @@ import duckdb
 import numpy as np
 import pandas as pd
 
-SCRIPT_VERSION = "2.0"
+SCRIPT_VERSION = "2.1"
 SOURCE = "mt5"
 SYMBOL = "GOLD"
 MIN_BARS_FULL_DAY = 1000          # ngày có > 1000 nến mới coi là M1 thật
@@ -47,6 +47,18 @@ def sha256_of_file(path: Path) -> str:
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
+    return h.hexdigest()
+
+
+def sha256_of_directory(dir_path: Path) -> str:
+    """Tính SHA-256 kết hợp của toàn bộ các file trong thư mục (sắp xếp theo tên tương đối)."""
+    h = hashlib.sha256()
+    files = sorted([f for f in dir_path.rglob("*") if f.is_file()])
+    for f in files:
+        h.update(f.relative_to(dir_path).as_posix().encode("utf-8"))
+        with open(f, "rb") as fp:
+            for chunk in iter(lambda: fp.read(1 << 20), b""):
+                h.update(chunk)
     return h.hexdigest()
 
 
@@ -244,7 +256,9 @@ def load_raw_data(src: Path, root: Path) -> tuple[pd.DataFrame, str, bool]:
             except Exception:
                 pass
         if not sha:
-            sha = KNOWN_RAW_SHA if ("decf3c12" in src.as_posix() or src.name == "decf3c12") else (src.name if len(src.name) == 64 else KNOWN_RAW_SHA)
+            # Với thư mục: không bao giờ mặc định KNOWN_RAW_SHA.
+            # Nếu không tìm thấy trong sources, băm các file trong thư mục.
+            sha = sha256_of_directory(src)
         is_already_raw = is_in_raw
     else:
         # File đơn lẻ bên ngoài

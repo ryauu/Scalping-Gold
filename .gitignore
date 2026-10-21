@@ -19,3 +19,6 @@ venv/
 # --- Hệ điều hành ---
 .DS_Store
 Thumbs.db
+
+# --- Scratch ---
+scratch/
