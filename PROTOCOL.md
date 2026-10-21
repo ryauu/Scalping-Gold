@@ -294,7 +294,8 @@ Chiến lược chỉ kích hoạt tín hiệu khi chuỗi sự kiện tuần t�
     - Theo chỉ số nến: $bar\_index_{\text{fvg}} \ge bar\_index_s + 1$.
     - Theo thời gian: $time\_candle_{\text{fvg}} \ge time\_utc[s+1]$ (tương đương $time\_available_{\text{fvg}} \ge time\_available_s + 1\text{h}$).
   - **Lý do sửa đổi:** Bảo đảm tính nhân quả logic theo đúng phương pháp SMC: khối FVG mất cân bằng phải là kết quả của xung lực bứt phá (displacement) xảy ra **SAU** khi thanh khoản bị quét, thể hiện phản ứng đảo chiều thực sự của thị trường sau sweep.
-  - **Thừa nhận thu hẹp quy tắc:** Văn bản đăng ký ban đầu tại dòng 131 ghi `time_candle >= time_s` với `time_candle` là nến thứ ba ($i$), điều này vô tình cho phép $i = s \implies i-1 = s-1$ (tức xung lực xảy ra trước khi quét thanh khoản). Việc siết thành $i \ge s+1$ là một **sửa đổi nội dung (amendment)** chính thức thu hẹp không gian tín hiệu nhằm loại trừ các FVG hình thành trước sweep.
+  - **Thừa nhận thu hẹp quy tắc:** Văn bản đăng ký ban đầu tại dòng 125 (chuỗi SELL) và dòng 131 (chuỗi BUY) ghi `time_candle >= time_s` với `time_candle` là nến thứ ba ($i$), điều này vô tình cho phép $i = s \implies i-1 = s-1$ (tức xung lực xảy ra trước khi quét thanh khoản). Việc siết thành $i \ge s+1$ là một **sửa đổi nội dung (amendment)** chính thức thu hẹp không gian tín hiệu nhằm loại trừ các FVG hình thành trước sweep.
+  - **Quy tắc thay thế (Superseding Clause):** Quy tắc $i \ge s+1$ ($time\_candle_{\text{fvg}} \ge time\_utc[s+1]$) tại C9 này chính thức **THAY THẾ (supersede)** điều kiện `time_candle >= time_s` tại cả dòng 125 và dòng 131 của bản đăng ký v1.0 nguyên thủy. Các câu chữ nguyên văn của v1.0 được giữ nguyên làm bằng chứng lịch sử, nhưng logic thực thi kể từ v1.1 tuân thủ tuyệt đối quy tắc C9 này.
   - **Trường hợp nến sweep $s$ là nến xung lực:** Quy tắc cho phép $i-1 = s$. Khi đó, nến thứ ba $i = s+1$ đóng cửa sẽ hoàn tất FVG hợp lệ.
 
 ---
